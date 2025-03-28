@@ -9,3 +9,5 @@ context_database
 generation_results
 graph_based_query
 search_results
+tree-sitter-java
+tree-sitter-python
