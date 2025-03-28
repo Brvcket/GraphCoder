@@ -33,10 +33,7 @@ def build_query_subgraph(task_name):
             with open(os.path.join(CONSTANTS.repo_base_dir, case_path), 'r') as f:
                 src_lines = f.readlines()
             query_context = src_lines[:line_no]
-            print(query_context)
-            print(case_id)
             ccg = create_graph(query_context, case_id)
-            print(ccg)
             query_ctx, query_line_list, query_graph = last_n_context_lines_graph(ccg)
             graph_case = dict()
             graph_case['query_forward_graph'] = graph_to_json(query_graph)
