@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.coordinatorlayout.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    tools:context=".MainActivity">
+
+    <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+        android:id="@+id/stories_swipe_refresh"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent">
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/stories_recyclerview"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:fitsSystemWindows="true"
+            android:clipToPadding="false"
+            tools:listitem="@layout/story_list_item" />
+    </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
+
+    <!-- My memory is failing me on what this container does but it has
+     a custom drawable background for some reason. I _think_ it is to make
+     sure that the button has a nice shadow but I'm not quite sure-->
+    <LinearLayout
+        android:id="@+id/stories_update_container"
+        android:foreground="?selectableItemBackgroundBorderless"
+        android:elevation="8dp"
+        android:layout_marginBottom="24dp"
+        android:paddingLeft="4dp"
+        android:paddingRight="4dp"
+        android:background="@drawable/scrolling_helper_background"
+        android:layout_gravity="bottom|center_horizontal"
+        android:layout_width="wrap_content"
+        android:layout_height="48dp">
+
+        <Button
+            style="@style/Widget.Material3.Button"
+            android:id="@+id/stories_update_button"
+            android:textAllCaps="false"
+            android:text="Tap to update"
+            android:fontFamily="@font/product_sans"
+            android:textStyle="bold"
+            android:textColor="?attr/colorOnSecondary"
+            app:iconTint="?attr/colorOnSecondary"
+            android:backgroundTint="?attr/colorSecondary"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"    />
+
+    </LinearLayout>
+
+</androidx.coordinatorlayout.widget.CoordinatorLayout>

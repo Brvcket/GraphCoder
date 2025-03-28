@@ -1,0 +1,151 @@
+<gtx-search-bar
+    *ngIf="showSearch"
+    class="search-bar"
+    [query]="query"
+    [placeholder]="'shared.search' | i18n"
+    (search)="updateSearchQuery($event)"
+    (clear)="updateSearchQuery('')"
+></gtx-search-bar>
+
+<div *ngIf="!hideActions" class="entity-table-actions-bar">
+    <gtx-button
+        class="table-action-button"
+        flat
+        size="small"
+        type="primary"
+        [disabled]="disabled"
+        [gtxActionAllowed]="'scheduler.createSchedule'"
+        (click)="handleCreateButton()"
+    >
+        <icon left>add</icon> {{ 'shared.create_new_schedule' | i18n }}
+    </gtx-button>
+
+    <gtx-button
+        class="table-action-button"
+        flat
+        size="small"
+        type="success"
+        [disabled]="disabled || loadingSchedulerStatus || !canManageScheduler || schedulerRunning"
+        (click)="handleSchedulerResume()"
+    >
+        <icon left>play_arrow</icon> {{ 'scheduler.resume_scheduler' | i18n }}
+    </gtx-button>
+
+    <gtx-button
+        class="table-action-button"
+        flat
+        size="small"
+        type="warning"
+        [disabled]="disabled || loadingSchedulerStatus || !canManageScheduler || !schedulerRunning"
+        (click)="handleSchedulerPause()"
+    >
+        <icon left>pause</icon> {{ 'scheduler.suspend_scheduler' | i18n }}
+    </gtx-button>
+
+    <gtx-button
+        class="table-action-button reload-button"
+        flat
+        size="small"
+        type="primary"
+        [disabled]="disabled || loading"
+        (click)="reload()"
+    >
+        <icon left>refresh</icon> {{ 'common.reload_table_button' | i18n }}
+    </gtx-button>
+</div>
+
+<div *ngIf="selectable" class="entity-table-selection">
+    {{ 'scheduler.info_selected_schedules' | i18n:{ amountSelected: selected?.length, amountTotal: totalCount } }}
+</div>
+
+<gtx-progress-bar class="load-bar" [active]="loading"></gtx-progress-bar>
+
+<gtx-table
+    class="entity-table"
+
+    [selectAllType]="TableSelectAllType.PAGE"
+    [selectable]="selectable"
+    [hideActions]="hideActions"
+    [disabled]="disabled"
+
+    [columns]="columns"
+    [rows]="rows"
+    [actions]="actions"
+    [selected]="selected"
+    [active]="activeEntity"
+    [totalCount]="totalCount"
+
+    [page]="page"
+    [perPage]="perPage"
+    [sortBy]="sortBy"
+    [sortOrder]="sortOrder"
+
+    [renderers]="{
+        active: boolIconRenderer,
+        type: typeRenderer,
+        task: taskRenderer,
+        status: statusRenderer,
+        execResult: resultRenderer,
+        execStart: dateRenderer,
+        execDuration: durationRenderer
+    }"
+
+    (pageChange)="changePageTo($event)"
+    (sortByChange)="updateSortBy($event)"
+    (sortOrderChange)="updateSortOrder($event)"
+    (selectedChange)="updateSelection($event)"
+    (rowClick)="handleRowClick($event)"
+    (actionClick)="handleAction($event)"
+></gtx-table>
+
+<ng-template #typeRenderer let-value="value">
+    <span class="gtx-table-cell-text">
+        {{ 'scheduler.scheduleType_' + value | i18n }}
+    </span>
+</ng-template>
+
+<ng-template #statusRenderer let-value="value">
+    <span class="gtx-table-cell-text">
+        {{ 'scheduler.schedule_status_' + value | i18n }}
+    </span>
+</ng-template>
+
+<ng-template #resultRenderer let-value="value" let-row="row">
+    <a
+        *ngIf="row.item.lastExecution"
+        class="gtx-table-cell-link"
+        (click)="openExecutionDetails(row, $event)"
+    >
+        {{ 'scheduler.execution_result_' + (value == null ? 'running' : (value ? 'true' : 'false')) | i18n }}
+    </a>
+</ng-template>
+
+<ng-template #taskRenderer let-value="value" let-row="row">
+    <a
+        *ngIf="value > 0"
+        class="gtx-table-cell-link"
+        [routerLink]="AdminUIEntityDetailRoutes.SCHEDULE_TASK | gtxEntityDetailRouterLink:row.item.taskId"
+        (click)="cancelEvent($event)"
+    >
+        {{ row.item.task?.name || row.item.taskId }}
+    </a>
+</ng-template>
+
+<ng-template #dateRenderer let-value="value">
+    <span class="gtx-table-cell-text">
+        {{ value | i18nDate }}
+    </span>
+</ng-template>
+
+<ng-template #durationRenderer let-value="value">
+    <span class="gtx-table-cell-text">
+        {{ value | gtxDuration }}
+    </span>
+</ng-template>
+
+<ng-template #boolIconRenderer let-value="value">
+    <icon
+        class="gtx-table-cell-boolean"
+        [ngClass]="'gtx-table-cell-boolean-' + value"
+    >{{ value ? 'check' : 'close' }}</icon>
+</ng-template>

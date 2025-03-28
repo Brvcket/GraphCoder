@@ -1,0 +1,22 @@
+plugins {
+    id 'net.neoforged.gradle.vanilla'
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(17)
+    }
+}
+
+dependencies {
+    implementation 'net.minecraft:client:1.20.1'
+}
+
+runs {
+    client {
+        modSources = [sourceSets.main]
+    }
+    server {
+        modSources = [sourceSets.main]
+    }
+}

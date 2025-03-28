@@ -1,0 +1,26 @@
+{
+    "extends": "./tsconfig.json",
+    "compilerOptions": {
+        "types": []
+    },
+    "files": [
+        "src/main.ts",
+        "src/polyfills.ts"
+    ],
+    "include": [
+        "src/**/*.d.ts",
+        "../../libs/cms-rest-clients-angular/src/public-api.ts",
+        "../../libs/cms-models/src/public-api.ts",
+        "../../libs/ui-core/src/public-api.ts"
+    ],
+    "exclude": [
+        "src/test.ts",
+        "**/*.spec.ts",
+        "cypress/**/*",
+        "cypress.config.ts",
+        "**/*.cy.ts",
+        "**/*.cy.js",
+        "**/*.cy.tsx",
+        "**/*.cy.jsx"
+    ]
+}

@@ -1,0 +1,89 @@
+@import "variables";
+
+.gtx-entity-detail {
+    position: relative;
+    display: block;
+    height: 100%;
+    width: 100%;
+
+    & > gtx-tabs {
+        height: 100%;
+
+        .tab-content {
+            display: flex;
+            width: 100%;
+            height: calc(100% - 28px);
+            flex-wrap: nowrap;
+            flex-direction: column;
+        }
+    }
+}
+
+.gtx-entity-details-tab-content-header {
+    padding-top: 1rem;
+    padding-bottom: 1rem;
+}
+
+// .gtx-entity-details-tab-content-header-title {
+//     font-size: $gtx-font-size-lead;
+// }
+
+.gtx-entity-details-tab-content-body {
+    display: block;
+    height: 100%;
+    width: 100%;
+    flex: 1 1 auto;
+    overflow: auto;
+    // padding-right: 0.5rem;
+}
+
+.detail-tab-wrapper {
+    display: flex;
+    flex-direction: column;
+    flex-wrap: nowrap;
+    height: 100%;
+    width: 100%;
+
+    > * {
+        flex: 0 1 auto;
+        width: 100%;
+        min-height: 1px;
+    }
+
+    .properties {
+        display: block;
+        width: 100%;
+        height: 100%;
+    }
+}
+
+.gtx-validation-hints {
+    color: $gtx-color-alert;
+    margin-top: -1rem;
+}
+
+.gtx-entity-grid-headerbar {
+    display: flex;
+    flex-flow: row wrap;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.gtx-entity-grid-selected-info {
+    display: inline-block;
+    font-size: 14px;
+    font-weight: 400;
+    height: 19px;
+    line-height: normal;
+    text-size-adjust: 100%;
+    white-space: normal;
+    color: $gtx-color-dark-gray;
+}
+
+.gtx-btn-password {
+    margin-top: 1.23rem;
+    @media screen and (max-width: $small-screen) {
+        margin-top: 0;
+        margin-bottom: 2rem;
+    }
+}

@@ -1,0 +1,13 @@
+@import "variables";
+
+:host {
+    display: block;
+    padding: 24px;
+}
+
+.form-container {
+    display: none;
+    &.active {
+        display: block;
+    }
+}

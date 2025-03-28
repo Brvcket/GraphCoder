@@ -1,0 +1,50 @@
+@import "variables";
+
+:host {
+    width: 100%;
+}
+
+.container {
+    display: flex;
+    flex-direction: column;
+    flex-wrap: nowrap;
+    width: 100%;
+    height: 100%;
+
+    .host-iframe {
+        width: 100%;
+        flex-grow: 1;
+        overflow: hidden;
+
+        ::ng-deep iframe {
+            max-height: 100%;
+        }
+    }
+
+    .hidden ::ng-deep iframe {
+        visibility: hidden;
+    }
+
+    .footer {
+        flex-shrink: 0;
+        display: flex;
+        flex-direction: row;
+        flex-wrap: nowrap;
+        gap: 15px;
+        justify-content: flex-end;
+        padding: 0 20px 5px;
+
+        .delete-button {
+            margin-right: auto;
+        }
+    }
+}
+
+.error {
+    color: $gtx-color-alert;
+    text-align: center;
+}
+
+.close-button {
+    float: right;
+}

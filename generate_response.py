@@ -23,6 +23,7 @@ def parser_args():
 
 
 def main(args, input_cases, responses_save_name):
+    print('main')
 
     # set model and tokenizer
     if args.model == 'gpt-3.5-turbo-instruct':
@@ -41,9 +42,11 @@ def main(args, input_cases, responses_save_name):
             temperature=0,
             pad_token_id=tokenizer_raw.pad_token_id,
         )
-    elif args.model in ['codegen2-16b', 'codegen2-7b', 'codegen2-1b']:
-        model = AutoModelForCausalLM.from_pretrained(f"{args.model}/")
-        tokenizer_raw = AutoTokenizer.from_pretrained(f"./models_cache/{args.model}-tokenizer/", trust_remote_code=True)
+    elif args.model in ['codegen2-16b', 'codegen2-7', 'codegen2-1b']:
+        print('loading model')
+        model = AutoModelForCausalLM.from_pretrained('Salesforce/codegen2-1B')
+        print('model loaded')
+        tokenizer_raw = AutoTokenizer.from_pretrained(f"./models_cache/Salesforce/codegen2-1B-tokenizer/", trust_remote_code=True)
         tokenizer = CodeGenTokenizer(tokenizer_raw)
         max_num_tokens = 2048
         generation_config = GenerationConfig(
@@ -69,7 +72,7 @@ def main(args, input_cases, responses_save_name):
                     model=args.model,
                     prompt=prompt,
                     max_tokens=args.max_new_tokens,
-                    temperature=args.temperature
+                    temperature=1
                 )
                 response = completion.choices[0].text
             elif args.model == "starcoder":
@@ -82,7 +85,7 @@ def main(args, input_cases, responses_save_name):
                 n_prompt_lines = len(prompt_lines)
                 response_lines = response.splitlines(keepends=True)
                 response = "".join(response_lines[n_prompt_lines:])
-            elif args.model in ['codegen2-16b', 'codegen2-7b', 'codegen2-1b']:
+            elif args.model in ['codegen2-16b', 'codegen2-7', 'codegen2-1b']:
                 prompt_ids = tokenizer_raw(prompt, return_tensors="pt").to(device)
                 response_ids = model.generate(prompt_ids['input_ids'],
                                               generation_config=generation_config,
@@ -92,6 +95,7 @@ def main(args, input_cases, responses_save_name):
                 n_prompt_lines = len(prompt_lines)
                 response_lines = response.splitlines(keepends=True)
                 response = "".join(response_lines[n_prompt_lines:])
+                print(response)
             case_res = copy.deepcopy(case)
             case_res['generate_response'] = response
             responses.append(case_res)
@@ -101,14 +105,53 @@ def main(args, input_cases, responses_save_name):
 
 
 if __name__ == "__main__":
+    print('a')
     args = parser_args()
 
-    # load input
-    input_cases = load_jsonl(f"./search_res/{args.input_file_name}.search_res.jsonl")
+    # # load input
+    input_cases = load_jsonl(f"search_results/{args.input_file_name}.search_res.jsonl")
     print('Input loading finished')
 
     responses_save_name = f"./generation_results/{args.model}/{args.input_file_name}.{args.mode}.{args.model}.gen_res.jsonl"
     make_needed_dir(responses_save_name)
-    main(args, input_cases, responses_save_name)
+    # main(args, input_cases, responses_save_name)
+
+    model = AutoModelForCausalLM.from_pretrained('Salesforce/codegen2-1B')
+    print('model loaded')
+    tokenizer_raw = AutoTokenizer.from_pretrained(f"./models_cache/Salesforce/codegen2-1B-tokenizer/", trust_remote_code=True)
+    tokenizer = CodeGenTokenizer(tokenizer_raw)
+    max_num_tokens = 2048
+    generation_config = GenerationConfig(
+        max_new_tokens=args.max_new_tokens,
+        do_sample=False,
+        eos_token_id=tokenizer_raw.eos_token_id,
+        temperature=0,
+        pad_token_id=tokenizer_raw.pad_token_id,
+    )
+
+    responses = []
+    max_prompt_tokens = max_num_tokens - args.max_new_tokens
+    with tqdm(total=len(input_cases)) as pbar:
+        for case in input_cases:
+            pbar.set_description(f'Processing...')
+
+            prompt = build_prompt(case, tokenizer, max_prompt_tokens, max_top_k=args.max_top_k, mode=args.mode)
+            prompt_ids = tokenizer_raw(prompt, return_tensors="pt").to(device)
+            response_ids = model.generate(prompt_ids['input_ids'],
+                                          generation_config=generation_config,
+                                          attention_mask=prompt_ids['attention_mask'])
+            response = tokenizer.decode(response_ids[0])
+            prompt_lines = prompt.splitlines(keepends=True)
+            n_prompt_lines = len(prompt_lines)
+            response_lines = response.splitlines(keepends=True)
+            response = "".join(response_lines[n_prompt_lines:])
+            print(response)
+            case_res = copy.deepcopy(case)
+            case_res['generate_response'] = response
+            responses.append(case_res)
+            pbar.update(1)
+
+    dump_jsonl(responses, responses_save_name)
+
 
 

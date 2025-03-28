@@ -1,0 +1,255 @@
+import org.gradle.api.attributes.plugin.GradlePluginApiVersion
+import org.gradle.util.GradleVersion
+
+plugins {
+    id 'eclipse'
+    id 'maven-publish'
+    id 'org.cadixdev.licenser' version '0.6.1'
+    id 'net.neoforged.gradleutils' version '3.0.0-alpha.10'
+}
+
+gradleutils {
+    version {
+        branches {
+            suffixBranch()
+            suffixExemptedBranch('NG_7.0')
+        }
+    }
+}
+
+version = gradleutils.version.toString()
+
+//We hard coded the version of the gradle wrapper here.
+tasks.named('wrapper', Wrapper).configure { Wrapper wrapperTask ->
+    wrapperTask.distributionType = Wrapper.DistributionType.ALL
+}
+
+//Create an info task that prints out some useful information about the project.
+tasks.register('info') {
+    group = 'reporting'
+    description = 'Prints out some useful information about the project.'
+    doLast {
+        logger.lifecycle("Version: $version")
+        logger.lifecycle("Java:    ${System.getProperty('java.version')}")
+        logger.lifecycle("JVM:     ${System.getProperty('java.vm.version')} (${System.getProperty('java.vendor')})")
+        logger.lifecycle("Arch:    ${System.getProperty('os.arch')}")
+    }
+}
+
+changelog {
+    from "7.0"
+    disableAutomaticPublicationRegistration()
+}
+
+///First setup all the subprojects
+///Configure them in such a way that we can run test and have all the plugins applied.
+subprojects.forEach { Project subProject ->
+    //All base plugins.
+    subProject.apply plugin: 'net.neoforged.gradleutils'
+    subProject.apply plugin: 'java-library'
+    subProject.apply plugin: 'maven-publish'
+    subProject.apply plugin: 'eclipse'
+    subProject.apply plugin: 'idea'
+
+    gradleutils.setupSigning(project: subProject, signAllPublications: true)
+
+    //General project metadata. Everything has the same version and group.
+    subProject.version = subProject.rootProject.version
+    subProject.group = 'net.neoforged.gradle'
+    subProject.base.archivesName = "ng-${subProject.name.toLowerCase()}"
+
+    //Setup the java toolchain
+    subProject.java.toolchain.languageVersion = JavaLanguageVersion.of(project.java_version)
+    subProject.java.withSourcesJar()
+
+    //We exclude ASM from all subprojects, it is handled by Gradle itself.
+    subProject.configurations.configureEach { Configuration configuration ->
+        configuration.exclude group: 'org.ow2.asm'
+    }
+
+    ['apiElements', 'runtimeElements'].each {
+        subProject.configurations.named(it).configure {
+            attributes {
+                attribute(
+                        GradlePluginApiVersion.GRADLE_PLUGIN_API_VERSION_ATTRIBUTE,
+                        objects.named(GradlePluginApiVersion, GradleVersion.current().getVersion())
+                )
+            }
+        }
+    }
+
+    //Wire up our custom repositories.
+    subProject.repositories.mavenLocal()
+    subProject.repositories.maven { MavenArtifactRepository repository ->
+        repository.name 'NeoForged'
+        repository.url = 'https://maven.neoforged.net/releases'
+    }
+    subProject.repositories.gradlePluginPortal()
+
+    //Basic dependencies: Jetbrains Annotations, JUnit and Mockito for now.
+    subProject.dependencies.api subProject.dependencies.gradleApi()
+    subProject.dependencies.api "org.jetbrains:annotations:${project.jetbrains_annotations_version}"
+    subProject.dependencies.api("net.neoforged:groovydslimprover:${project.groovy_dsl_improver_version}") {
+        capabilities {
+            requireCapability 'net.neoforged:groovydslimprover-base'
+        }
+    }
+
+    subProject.dependencies.testImplementation subProject.dependencies.gradleTestKit()
+    subProject.dependencies.testImplementation "org.junit.jupiter:junit-jupiter-api:${project.junit_version}"
+    subProject.dependencies.testImplementation "org.junit.jupiter:junit-jupiter-params:${project.junit_version}"
+    subProject.dependencies.testImplementation "org.junit.jupiter:junit-jupiter-engine:${project.junit_version}"
+    subProject.dependencies.testImplementation "org.junit.platform:junit-platform-engine:${project.junit_platform_version}"
+    subProject.dependencies.testImplementation "org.mockito:mockito-junit-jupiter:${project.mockito_version}"
+    subProject.dependencies.testImplementation "org.mockito:mockito-core:${project.mockito_version}"
+    subProject.dependencies.testImplementation "org.mockito:mockito-inline:${project.mockito_version}"
+    subProject.dependencies.testImplementation "net.neoforged.trainingwheels:base:${project.trainingwheels_version}"
+    subProject.dependencies.testImplementation "net.neoforged.trainingwheels:gradle-base:${project.trainingwheels_version}"
+    subProject.dependencies.testImplementation "net.neoforged.trainingwheels:gradle-functional:${project.trainingwheels_version}"
+
+    //Exclude duplicates.
+    subProject.tasks.withType(Jar).configureEach { jarTask ->
+        jarTask.duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    }
+
+    //Setup the test task to use JUnit 5 and its platform.
+    subProject.tasks.withType(Test).configureEach { testTask ->
+        testTask.useJUnitPlatform()
+    }
+
+    //Make groovy incremental and use indy (Should allow for faster compilation, and makes its code more readable)
+    subProject.tasks.withType(GroovyCompile).configureEach {
+        options.incremental = true
+        groovyOptions.optimizationOptions.indy = true
+    }
+
+    //noinspection ConfigurationAvoidance Due to how the eclipse plugin creates this task, tasks.named throws
+    subProject.tasks.findByName('eclipseJdt')?.configure {
+        doFirst {
+            it.getJdt().file.withProperties { properties ->
+                // Eclipse's view of projects treat circular dependencies (which we don't actually have but w/e) as errors by default
+                properties['org.eclipse.jdt.core.circularClasspath'] = 'warning'
+            }
+        }
+    }
+
+    //Run tests in parallel
+    subProject.test {
+        maxParallelForks = Runtime.runtime.availableProcessors() - 1
+    }
+}
+
+//Configure all the subprojects that are plugins
+subprojects.forEach { subProject ->
+    subProject.afterEvaluate { Project evalSubProject ->
+        if (!evalSubProject.getPlugins().hasPlugin("java-gradle-plugin")) {
+            return
+        }
+
+        //Custom source set.
+        evalSubProject.sourceSets.register('functionalTest') { SourceSet sourceSet ->
+            sourceSet.java.srcDir evalSubProject.file('src/functionalTest/java')
+            sourceSet.resources.srcDir evalSubProject.file('src/functionalTest/resources')
+        }
+
+        //And handle the dependency configurations for them.
+        evalSubProject.gradlePlugin.testSourceSets(evalSubProject.sourceSets.functionalTest)
+        evalSubProject.configurations.functionalTestImplementation.extendsFrom(evalSubProject.configurations.testImplementation)
+
+        //All dependencies needed to run the functional tests.
+        evalSubProject.dependencies.functionalTestImplementation subProject.dependencies.gradleTestKit()
+        evalSubProject.dependencies.functionalTestImplementation "org.junit.jupiter:junit-jupiter:${project.junit_version}"
+        evalSubProject.dependencies.functionalTestImplementation("org.spockframework:spock-core:${project.spock_version}-groovy-${project.groovy_version}") { spec ->
+            spec.exclude group: 'org.codehaus.groovy'
+        }
+        evalSubProject.dependencies.functionalTestImplementation "net.neoforged.trainingwheels:gradle-functional:${project.trainingwheels_version}"
+        evalSubProject.dependencies.functionalTestImplementation project(':test-utils')
+
+        //Configure the plugin metadata, so we can publish it.
+        evalSubProject.gradlePlugin.plugins { NamedDomainObjectContainer<PluginDeclaration> plugins ->
+            plugins.register(evalSubProject.name.toLowerCase()) {
+
+                //Determine the class name and package of the plugin.
+                def pluginFile = evalSubProject.fileTree('src/main/java')
+                        .filter { it.name.toLowerCase() == "${evalSubProject.getName()}plugin.java".toLowerCase() }
+                        .first()
+
+                //We need to handle the case of a fresh new project, no files exist yet, so the pluginFile object will be null.
+                def pluginClassName = "unknown"
+                if (pluginFile != null) {
+                    pluginClassName = evalSubProject.file('src/main/java/').toPath().relativize(pluginFile.toPath()).toString().replace('/', '.').replace('\\', '.').replace(".java", "")
+                }
+
+                def pluginId = 'net.neoforged.gradle.' + evalSubProject.name.toLowerCase()
+                try {
+                    var propertyValue = evalSubProject.property('pluginId')
+                    if (propertyValue != null) {
+                        pluginId = propertyValue
+                    }
+                } catch (Exception ignored) {}
+
+                //Setup the plugin id.
+                id = pluginId
+                //And the implementation class.
+                implementationClass = pluginClassName
+            }
+        }
+
+        //Run task which will run the functional tests.
+        evalSubProject.tasks.register('functionalTest', Test) {
+            group 'verification'
+
+            testClassesDirs = evalSubProject.sourceSets.functionalTest.output.classesDirs
+            classpath = evalSubProject.sourceSets.functionalTest.runtimeClasspath
+
+            it.extensions.add('test-source-set', evalSubProject.sourceSets.functionalTest)
+        }
+
+        //Wire them up so they run as part of the check task (and as such through build, but not through test!)
+        evalSubProject.tasks.named('check') {
+            // Run the functional tests as part of `check`
+            dependsOn evalSubProject.tasks.functionalTest
+        }
+
+        //Setup plugin publishing
+        evalSubProject.gradlePlugin.automatedPublishing = true
+
+        //Handle the idea plugin
+        evalSubProject.idea { ideaSpec ->
+            ideaSpec.module { ideaModule ->
+                ideaModule.getTestSources().from(evalSubProject.sourceSets.functionalTest.java)
+                ideaModule.getTestSources().from(evalSubProject.sourceSets.functionalTest.resources)
+            }
+        }
+    }
+}
+
+//Configure all the subprojects which are not plugins
+subprojects.forEach { subProject ->
+    subProject.afterEvaluate { Project evalSubProject ->
+        evalSubProject.publishing.repositories { RepositoryHandler repositories ->
+            maven gradleutils.getPublishingMaven()
+        }
+
+        if (evalSubProject.getPlugins().hasPlugin("java-gradle-plugin")) {
+            evalSubProject.publishing.publications { PublicationContainer publications ->
+                publications.create('pluginMaven', MavenPublication) { publication ->
+                    if (evalSubProject.name == 'userdev') {
+                        project.changelog.publish publication
+                    }
+                }
+            }
+
+            return
+        }
+
+        evalSubProject.publishing.publications { PublicationContainer publications ->
+            publications.create('maven', MavenPublication) { publication ->
+                publication.from evalSubProject.components.java
+            }
+        }
+    }
+}
+
+//Apply the custom gradle file for handling the github ci infrastructure.
+apply from: '.github/gradle/gradle.gradle'

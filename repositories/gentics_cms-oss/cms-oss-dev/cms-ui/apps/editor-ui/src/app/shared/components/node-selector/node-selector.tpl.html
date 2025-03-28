@@ -1,0 +1,33 @@
+<gtx-dropdown-list>
+    <gtx-dropdown-trigger>
+        <gtx-button
+            *ngIf="!showName; else nameTpl"
+            icon
+            type="default"
+            [title]="('common.select_node' | i18n) + '…'">
+            <icon>arrow_drop_down</icon>
+        </gtx-button>
+
+        <ng-template #nameTpl>
+            <a flat type="default" [title]="('common.select_node' | i18n) + '…'">
+                {{ currentSelectedNode?.name }}
+            </a>
+        </ng-template>
+    </gtx-dropdown-trigger>
+
+    <gtx-dropdown-content>
+        <ng-content></ng-content>
+
+        <list-filter
+            selector="gtx-dropdown-item"
+            filterThreshhold="10"
+            [label]="'editor.filter_nodes' | i18n"
+        >
+            <node-selector-tree
+                [branches]="nodeBranches"
+                [useLinks]="useLinks"
+                (nodeSelected)="select($event)"
+            ></node-selector-tree>
+        </list-filter>
+    </gtx-dropdown-content>
+</gtx-dropdown-list>

@@ -1,0 +1,20 @@
+@import "variables";
+
+:host {
+    @include input-label-styles('.tag-prop-label');
+
+    .tag-prop-label {
+        position: static;
+        font-size: 0.8rem;
+    }
+
+    gtx-textarea ::ng-deep textarea {
+        min-height: 7em;
+        max-height: 20em;
+    }
+
+    gtx-textarea.no-label ::ng-deep textarea {
+        margin-top: 0;
+    }
+
+}

@@ -1,0 +1,151 @@
+[build-system]
+requires = ["flit_core >=3.2,<4"]
+build-backend = "flit_core.buildapi"
+
+[project]
+name = "axlearn"
+version = "0.0.1"
+description = "AXLearn"
+readme = "README.md"
+requires-python = ">=3.9"
+
+# Production dependencies.
+# Every time we upgrade JAX, we should try to bring the rest to the newest versions.
+dependencies = [
+    "attrs>=23.1.0", # We use `type` in `attrs.field`
+    "absl-py==2.1.0",
+    "chex==0.1.86",  # chex 0.1.86 is required for jax 0.4.25.
+    "importlab==0.7",  # breaks pytype on 0.8
+    "jax==0.4.28",
+    "jaxlib==0.4.28",
+    "nltk==3.7",  # for text preprocessing
+    "numpy==1.26.4",  # verified with tensorflow 2.14 RaggedTensor
+    "optax==0.1.7",  # optimizers (0.1.0 has known bugs).
+    "portpicker",
+    "protobuf>=3.20.3",
+    "tensorboard-plugin-profile==2.14.0",
+    # This has both x86 and arm64 wheels. Underneath the hood it uses tensorflow-macos since 2.13.
+    "tensorflow==2.14.0",
+    "tensorflow-datasets>=4.9.2",
+    "tensorflow-io==0.34.0",  # 0.34.0 enabled macOS arm64 builds, but >= 0.35.0 hits 'pure virtual method called' with s3
+    "tensorflow_text==2.14.0; platform_machine == 'x86_64'", # implied by seqio, but also used directly for text processing
+    "tensorstore>=0.1.21",  # used for supporting GDA checkpoints
+    "toml",  # for config management
+    "typing-extensions==4.9.0",  # needed for typing.Protocol. >4.9.0 runs into attribute error `__non_callable_proto_members__`.
+    "scipy==1.12.0",  # to avoid "module 'scipy.linalg' has no attribute 'tril'"
+    "seqio==0.0.18",  # used for inputs
+    "aqtp==0.4.0", # aqtp>=0.5.0 requires python>=3.10 due to the use of Union shorthand "|" in type hints.
+    "flax==0.8.2", # for AQT, param converter and adapter.
+]
+
+[project.optional-dependencies]
+# Apple Silicon dependencies.
+# Need to run `conda install -c apple tensorflow-deps` separately.
+apple-silicon = [
+    "tensorflow-metal==1.1.0; platform_machine == 'arm64'",
+    # As of Nov 15, 2023, tensorflow_text has no arm64 build.
+    # We need to manually build the wheel and install it, following instructions at https://github.com/tensorflow/text/tree/2.14#build-from-source-steps.
+]
+
+# Requirements for testing and development.
+dev = [
+    "black==23.1a1",  # formatting
+    "diffusers==0.26.3", # diffuser dependency for golden config updates
+    "einops",
+    "evaluate",
+    "fairseq==0.12.2",  # test-only; note Apple Silicon start.md instructions parse this specifier '==', please be careful when upgrading.
+    "isort",  # formatting
+    "pre-commit",  # local pre commit hooks
+    "pycocotools",  # COCO evaluation tools
+    "pylint==2.17.7",
+    "pytest",  # test runner
+    "pytest-xdist",  # pytest plugin for test parallelism
+    "pytype==2022.4.22",  # type checking
+    "scikit-learn>=1.1.1",  # test-only
+    # Fix AttributeError: module 'scipy.linalg' has no attribute 'tril' and related scipy import errors.
+    "scipy==1.12.0",
+    "sentencepiece != 0.1.92",
+    "tqdm",  # test-only
+    "timm==0.6.12",  # DiT Dependency test-only
+    "torch>=1.12.1",  # test-only
+    "torchvision==0.16.1",  # test-only
+    "transformers==4.40.1",  # test-only
+    "wandb",  # test-only
+    "wrapt",  # implied by tensorflow-datasets, but also used in config tests.
+]
+# Requirements for GCP job management.
+gcp = [
+    "cloud-tpu-client",  # for creating and managing TPUs.
+    "crcmod",  # for file uploads.
+    "kubernetes",
+    "google-api-core==2.17.1",
+    "google-api-python-client==2.109.0",
+    "google-auth==2.29.0",
+    "google-auth[pyopenssl]",  # Ensures that we have compatible pyopenssl/cryptography pins.
+    "google-cloud-storage==2.16.0",
+    "google-cloud-core==2.3.3",
+    "ml_goodput_measurement==0.0.2",
+    "pyOpenSSL>=22.1.0",  # compat with cryptography version.
+]
+# For TPU training.
+# Note: Specify -f https://storage.googleapis.com/jax-releases/libtpu_releases.html during install.
+tpu = [
+    "axlearn[gcp]",
+    "jax[tpu]==0.4.28",  # must be >=0.4.19 for compat with v5p.
+]
+# Vertex AI tensorboard.
+vertexai_tensorboard = [
+    # Required to fix a `distro-info` bug we run into when using `tb_gcp_tensorboard` from
+    # `google_cloud_aiplatform[tensorboard]`. See:
+    # [1] https://bugs.launchpad.net/ubuntu/+source/distro-info/+bug/1991606
+    # [2] https://github.com/pypa/setuptools/issues/3772
+    "setuptools==65.7.0",
+    "google-cloud-aiplatform[tensorboard]",
+    "tensorboard",
+]
+# Dataflow dependencies.
+dataflow = [
+    "apache-beam==2.55.1",
+    "apache-beam[gcp]",
+    "google-apitools",  # for beam pipeline
+    "orjson==3.9.10",
+]
+# GPU custom kernel dependency.
+gpu = [
+    "triton==2.1.0",
+]
+
+[tool.flit.module]
+# This defines the import name. https://flit.pypa.io/en/stable/pyproject_toml.html#module-section
+name = "axlearn"
+
+[project.scripts]
+# Entrypoint for CLI.
+axlearn = "axlearn.cli:main"
+
+[tool.black]
+line-length = 100
+target-version = ['py38', 'py39']
+
+[tool.ruff]
+line-length = 100
+target-version = 'py39'
+
+[tool.pytest.ini_options]
+addopts = "-rs -s -p no:warnings --junitxml=test-results/testing.xml"
+markers = [
+    "gs_login: tests needing GS login.",
+    "tpu: tests needing access to a TPU device.",
+    "high_cpu: tests that require a lot of CPU.",
+    "fp64: tests that require 64-bit floating point precision.",
+    "golden_config: golden config tests.",
+    "golden_init: golden init tests.",
+    "golden_regularizer: golden regularizer scale tests.",
+    "golden_param_update: golden param update scale tests.",
+]
+testpaths = "."
+junit_family="xunit2"
+
+[tool.isort]
+line_length = 100
+profile = "black"

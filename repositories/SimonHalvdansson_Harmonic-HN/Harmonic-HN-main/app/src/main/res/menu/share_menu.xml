@@ -1,0 +1,20 @@
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools" tools:context=".MainActivity">
+
+    <item
+        android:id="@+id/menu_link"
+        android:title="Article link" />
+
+    <item
+        android:id="@+id/menu_link_title"
+        android:title="Article link and title" />
+
+    <item
+        android:id="@+id/menu_hacker_news_link"
+        android:title="HN link" />
+
+    <item
+        android:id="@+id/menu_hacker_news_link_title"
+        android:title="HN link and title" />
+
+</menu>

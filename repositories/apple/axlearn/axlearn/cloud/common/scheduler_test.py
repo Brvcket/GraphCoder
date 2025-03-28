@@ -1,0 +1,761 @@
+# Copyright © 2023 Apple Inc.
+
+"""Tests job scheduler."""
+# pylint: disable=unused-argument
+
+import collections
+from datetime import datetime, timedelta
+from typing import Dict, Optional
+from unittest import mock
+
+from absl.testing import absltest, parameterized
+
+from axlearn.cloud.common.quota import QuotaInfo, UserQuotaInfo
+from axlearn.cloud.common.scheduler import (
+    JobMetadata,
+    JobQueue,
+    JobScheduler,
+    JobVerdict,
+    ProjectJobSorter,
+    TierScheduler,
+    _compute_total_limits,
+    _job_verdict,
+    _normalize_quotas,
+    _recursively_to_dict,
+)
+from axlearn.common.config import config_for_function
+from axlearn.common.test_utils import TestCase
+
+
+class ProjectJobSorterTest(absltest.TestCase):
+    """Tests ProjectJobSorter."""
+
+    def test_basic(self):
+        sorter: ProjectJobSorter = ProjectJobSorter.default_config().instantiate()
+        yesterday = datetime.now() - timedelta(days=1)
+        jobs = {
+            "a1": JobMetadata(
+                user_id="a",
+                project_id="p1",
+                priority=1,
+                creation_time=yesterday + timedelta(seconds=1),
+                resources={"tpu": 10},
+            ),
+            "a2": JobMetadata(
+                user_id="a",
+                project_id="p1",
+                priority=2,
+                creation_time=yesterday + timedelta(seconds=2),
+                resources={"tpu": 20},
+            ),
+            "b3": JobMetadata(
+                user_id="b",
+                project_id="p1",
+                priority=2,
+                creation_time=yesterday + timedelta(seconds=3),
+                resources={"tpu": 5},
+            ),
+            "b4": JobMetadata(
+                user_id="b",
+                project_id="p1",
+                priority=2,
+                creation_time=yesterday + timedelta(seconds=4),
+                resources={"tpu": 3},
+            ),
+            "b5": JobMetadata(
+                user_id="b",
+                project_id="p1",
+                priority=1,
+                creation_time=yesterday + timedelta(seconds=1),
+                resources={"tpu": 3},
+            ),
+        }
+        job_queue: JobQueue = sorter.sort(jobs)
+        self.assertSequenceEqual(
+            [
+                # Among priority=1, "a1" goes before "b5" because it is created earlier.
+                "a1",
+                # "b5" goes before "b3" because it has priority=1.
+                "b5",
+                # Among priority=2, user "b" has less usage than "a" at this point.
+                # "b3" goes next because it's earlier than "b4".
+                "b3",
+                # "b4" goes next because user "b" still has less usage than "a" at this point.
+                "b4",
+                # "a2" goes last.
+                "a2",
+            ],
+            [job_id for job_id, _ in job_queue],
+        )
+        for job_id, job_metadata in job_queue:
+            self.assertDictEqual(jobs[job_id].resources, job_metadata.resources, msg=job_id)
+
+
+def _mock_job_metadata(resources, creation_time=None):
+    m = mock.MagicMock()
+    m.resources = resources
+    if creation_time:
+        m.creation_time = creation_time
+    return m
+
+
+class UtilsTest(TestCase):
+    def test_recursively_to_dict(self):
+        x = dict(a=dict(b=[1, 2, 3]))
+        self.assertEqual(x, _recursively_to_dict(x))
+
+        y = collections.defaultdict(lambda: collections.defaultdict(list))
+        y["a"]["b"].extend([1, 2, 3])
+        self.assertEqual(x, _recursively_to_dict(y))
+
+    @parameterized.parameters(
+        dict(
+            quotas={"a": {"tpu": 0.1, "gpu": 3}, "b": {"tpu": 0.3, "gpu": 1}},
+            resource_limits={"tpu": 4, "gpu": 4},
+            expected={"a": {"tpu": 1.0, "gpu": 3.0}, "b": {"tpu": 3.0, "gpu": 1.0}},
+        ),
+        # Test when some limits are missing.
+        dict(
+            quotas={"a": {"tpu": 0.1, "gpu": 3}, "b": {"tpu": 0.3, "gpu": 1}},
+            resource_limits={"tpu": 4},
+            expected={"a": {"tpu": 1.0, "gpu": 0.0}, "b": {"tpu": 3.0, "gpu": 0.0}},
+        ),
+        # Test when some quotas are missing.
+        dict(
+            quotas={"a": {"tpu": 0.1}, "b": {"tpu": 0.3, "gpu": 1}},
+            resource_limits={"tpu": 4, "gpu": 4},
+            expected={"a": {"tpu": 1.0}, "b": {"tpu": 3.0, "gpu": 4.0}},
+        ),
+        # Test when total quotas are 0.
+        dict(
+            quotas={"a": {"tpu": 0.1, "gpu": 0.0}, "b": {"tpu": 0, "gpu": 0.0}},
+            resource_limits={"tpu": 4, "gpu": 0},
+            expected={"a": {"tpu": 4.0, "gpu": 0.0}, "b": {"tpu": 0.0, "gpu": 0.0}},
+        ),
+    )
+    def test_normalize_quotas(self, quotas: dict, resource_limits: dict, expected: dict):
+        actual = _normalize_quotas(quotas, resource_limits)
+        self.assertNestedAllClose(expected, _recursively_to_dict(actual))
+        # Make sure they sum to total limits.
+        for resource_type, value in resource_limits.items():
+            self.assertAlmostEqual(
+                value, sum(quota.get(resource_type, 0) for quota in actual.values())
+            )
+
+    @parameterized.parameters(
+        # Some basic cases.
+        dict(
+            resources={"tpu": 1},
+            limits={"tpu": 2},
+            over_limits=None,
+        ),
+        dict(
+            resources={"tpu": 3},
+            limits={"tpu": 2},
+            over_limits={"tpu"},
+        ),
+        # Multiple resource cases.
+        dict(
+            resources={"tpu": 1, "gpu": 2},
+            limits={"tpu": 2, "gpu": 2},
+            over_limits=None,
+        ),
+        dict(
+            resources={"tpu": 3, "gpu": 2},
+            limits={"tpu": 2, "gpu": 2},
+            over_limits={"tpu"},
+        ),
+        # Missing limits cases.
+        dict(
+            resources={"tpu": 1, "gpu": 2},
+            limits={"tpu": 2},
+            over_limits={"gpu"},
+        ),
+        dict(
+            resources={"tpu": 3},
+            limits={},
+            over_limits={"tpu"},
+        ),
+        dict(
+            resources={},
+            limits={},
+            over_limits=None,
+        ),
+    )
+    def test_job_verdict(self, resources: dict, limits: dict, over_limits: set):
+        self.assertEqual(over_limits, _job_verdict(resources, limits).over_limits)
+
+    @parameterized.parameters(
+        dict(resource_limits=[], expected={}),
+        dict(
+            resource_limits=[{"v4": 1}, {"v3": 1}, {"v4": 1, "v3": 1}], expected={"v4": 2, "v3": 2}
+        ),
+    )
+    def test_compute_total_limits(self, resource_limits: list, expected: dict):
+        self.assertEqual(expected, _compute_total_limits(resource_limits))
+
+
+class TierSchedulerTest(parameterized.TestCase):
+    def test_validate_tiers(self):
+        sched: TierScheduler = TierScheduler.default_config().instantiate()
+        common_kwargs = dict(project_quotas={}, project_jobs={})
+        with self.assertRaisesRegex(ValueError, "at least one tier"):
+            sched.schedule(resource_limits=[], **common_kwargs)
+
+        with self.assertRaisesRegex(ValueError, "sequence"):
+            sched.schedule(resource_limits={"v4": 10, "v3": 3}, **common_kwargs)
+
+        sched.schedule(resource_limits=[{"v4": 10, "v3": 3}], **common_kwargs)
+
+    @parameterized.parameters(
+        # Test a case where all jobs fit into tier 0.
+        dict(
+            project_jobs={
+                "a": (("a1", _mock_job_metadata({"v4": 5})),),
+                "b": (
+                    ("b1", _mock_job_metadata({"v4": 2})),
+                    ("b2", _mock_job_metadata({"v4": 3})),
+                ),
+            },
+            expected_project_limits={"a": {"v4": 5}, "b": {"v4": 5}},
+            expected_verdicts={"a1": True, "b1": True, "b2": True},
+            expected_tiers={"a1": 0, "b1": 0, "b2": 0},
+        ),
+        # Test tie-break. Although both are requesting the same amount, "b" is requesting more
+        # relative to its quota, so "a" will be prioritized.
+        dict(
+            project_jobs={
+                "b": (("b1", _mock_job_metadata({"v4": 7})),),
+                "a": (("a1", _mock_job_metadata({"v4": 7})),),
+            },
+            project_quotas={"b": {"v4": 5}, "a": {"v4": 10}},
+            expected_project_limits={"a": {"v4": 7}, "b": {"v4": 7}},
+            expected_verdicts={"a1": True, "b1": True},
+            expected_tiers={"a1": 0, "b1": 1},
+        ),
+        # Test tie-break. Since both have the same quotas, we will tie-break using creation time.
+        # In this case, a1 is created first.
+        dict(
+            project_jobs={
+                "a": (
+                    (
+                        "a1",
+                        _mock_job_metadata({"v4": 7}, creation_time=datetime(1900, 1, 1, 0, 0, 0)),
+                    ),
+                ),
+                "b": (
+                    (
+                        "b1",
+                        _mock_job_metadata({"v4": 7}, creation_time=datetime(1900, 1, 2, 0, 0, 0)),
+                    ),
+                ),
+            },
+            project_quotas={"b": {"v4": 10}, "a": {"v4": 10}},
+            expected_project_limits={"a": {"v4": 7}, "b": {"v4": 7}},
+            expected_verdicts={"a1": True, "b1": True},
+            expected_tiers={"a1": 0, "b1": 1},
+        ),
+        # Test when a higher priority job does not fit into tier 0, thus allowing a lower priority
+        # job to schedule onto tier 0.
+        dict(
+            project_jobs={
+                "a": (("a1", _mock_job_metadata({"v4": 12})),),
+                "b": (
+                    ("b1", _mock_job_metadata({"v4": 2})),
+                    ("b2", _mock_job_metadata({"v4": 1})),
+                ),
+            },
+            expected_project_limits={"a": {"v4": 12}, "b": {"v4": 3}},
+            expected_verdicts={"a1": True, "b1": True, "b2": True},
+            expected_tiers={"a1": 1, "b1": 0, "b2": 0},
+        ),
+        # In this case, "a" is requesting much more relative to its quota than "b", so "b" gets to
+        # go first (so "a" doesn't fit).
+        dict(
+            project_jobs={
+                "a": (("a1", _mock_job_metadata({"v4": 13})),),
+                "b": (
+                    ("b1", _mock_job_metadata({"v4": 4})),
+                    ("b2", _mock_job_metadata({"v4": 2})),
+                ),
+            },
+            expected_project_limits={"a": {"v4": 0}, "b": {"v4": 6}},
+            expected_verdicts={"a1": False, "b1": True, "b2": True},
+            expected_tiers={"a1": None, "b1": 0, "b2": 0},
+        ),
+        # Test that leftover resources from reserved tier are schedulable by subsequent tiers.
+        dict(
+            project_jobs={
+                "a": (("a1", _mock_job_metadata({"v4": 7})),),
+                "b": (
+                    ("b1", _mock_job_metadata({"v4": 1})),
+                    ("b2", _mock_job_metadata({"v4": 7})),
+                ),
+            },
+            expected_project_limits={"a": {"v4": 7}, "b": {"v4": 8}},
+            expected_verdicts={"a1": True, "b1": True, "b2": True},
+            expected_tiers={"a1": 0, "b1": 0, "b2": 1},
+        ),
+        # Test load balance.
+        dict(
+            project_jobs={
+                "a": tuple((f"a{i}", _mock_job_metadata({"v4": 1})) for i in range(3)),
+                "b": tuple((f"b{i}", _mock_job_metadata({"v4": 1})) for i in range(3)),
+                "c": tuple((f"c{i}", _mock_job_metadata({"v4": 1})) for i in range(3)),
+            },
+            resource_limits=[{"v4": 3}, {"v4": 2}],
+            project_quotas={"a": {"v4": 5}, "b": {"v4": 5}, "c": {"v4": 5}},
+            expected_project_limits={
+                "a": {"v4": 2},
+                "b": {"v4": 2},
+                "c": {"v4": 1},
+            },
+            expected_verdicts={
+                f"{project}{i}": f"{project}{i}" in ["a0", "b0", "c0", "a1", "b1"]
+                for project in ["a", "b", "c"]
+                for i in range(3)
+            },
+            expected_tiers={
+                "a0": 0,
+                "b0": 0,
+                "c0": 0,
+                "a1": 1,
+                "b1": 1,
+                "a2": None,
+                "b2": None,
+                "c1": None,
+                "c2": None,
+            },
+        ),
+        # Test projects with no quotas.
+        dict(
+            project_jobs={
+                "a": tuple((f"a{i}", _mock_job_metadata({"v4": 1})) for i in range(3)),
+                "b": tuple((f"b{i}", _mock_job_metadata({"v4": 1})) for i in range(3)),
+                "c": tuple((f"c{i}", _mock_job_metadata({"v4": 1})) for i in range(3)),
+            },
+            resource_limits=[{"v4": 2}, {"v4": 1}, {"v4": 2}],
+            # Note a and c both have no quotas (c has quotas for v3 only).
+            project_quotas={"b": {"v4": 3}, "c": {"v3": 4}},
+            expected_project_limits={
+                "b": {"v4": 3},
+                "a": {"v4": 1},
+                "c": {"v4": 1},
+            },
+            expected_verdicts={
+                f"{project}{i}": f"{project}{i}" in ["b0", "b1", "b2", "a0", "c0"]
+                for project in ["a", "b", "c"]
+                for i in range(3)
+            },
+            expected_tiers={
+                "b0": 0,
+                "b1": 0,
+                "b2": 1,
+                "a0": 2,
+                "c0": 2,
+                "a1": None,
+                "a2": None,
+                "c1": None,
+                "c2": None,
+            },
+        ),
+        # Test quotas of different scales.
+        dict(
+            project_jobs={
+                "a": (
+                    ("a1", _mock_job_metadata({"v3": 1})),
+                    ("a2", _mock_job_metadata({"v4": 1})),
+                    ("a3", _mock_job_metadata({"v3": 1, "v4": 1})),
+                ),
+                "b": (
+                    ("b1", _mock_job_metadata({"v3": 1})),
+                    ("b2", _mock_job_metadata({"v4": 1})),
+                    ("b3", _mock_job_metadata({"v3": 1, "v4": 1})),
+                ),
+            },
+            resource_limits=[{"v3": 2}, {"v4": 2}, {"v3": 1, "v4": 1}],
+            # Note v3 and v4 have different quota scales.
+            project_quotas={
+                "a": {"v3": 0.1, "v4": 2},  # Effectively {"v3": 1, "v4": 2}
+                "b": {"v3": 0.2, "v4": 1},  # Effectively {"v3": 2, "v4": 1}
+            },
+            expected_project_limits={"a": {"v3": 2, "v4": 2}, "b": {"v3": 1, "v4": 1}},
+            expected_verdicts={
+                "b1": True,
+                "a1": True,
+                "a2": True,
+                "b2": True,
+                "a3": True,
+                "b3": False,
+            },
+            expected_tiers={"b1": 0, "a1": 0, "a2": 1, "b2": 1, "a3": 2, "b3": None},
+        ),
+        # Test that we cannot exceed total limit.
+        # Note that missing resource types implicitly have limit 0.
+        dict(
+            project_jobs={
+                "a": (("a1", _mock_job_metadata({"v4": 1, "v3": 2})),),
+                "b": (
+                    ("b1", _mock_job_metadata({"v4": 2})),
+                    ("b2", _mock_job_metadata({"v4": 7})),
+                ),
+            },
+            resource_limits=[{"v4": 3}],
+            expected_project_limits={"a": {"v4": 0, "v3": 0}, "b": {"v4": 2}},
+            expected_verdicts={"a1": False, "b1": True, "b2": False},
+            expected_tiers={"a1": None, "b1": 0, "b2": None},
+        ),
+        # Test that we can accumulate across tiers. Jobs should schedule onto the final tier.
+        dict(
+            project_jobs={
+                "a": (("a1", _mock_job_metadata({"v4": 1, "v3": 2})),),
+                "b": (
+                    ("b1", _mock_job_metadata({"v4": 3})),
+                    ("b2", _mock_job_metadata({"v4": 7})),
+                ),
+            },
+            resource_limits=[{"v4": 1}, {"v4": 1}, {"v4": 1}],
+            expected_project_limits={"a": {"v4": 0, "v3": 0}, "b": {"v4": 3}},
+            expected_verdicts={"a1": False, "b1": True, "b2": False},
+            expected_tiers={"a1": None, "b1": 2, "b2": None},
+        ),
+        # Test that we can accumulate across tiers across resource types.
+        dict(
+            project_jobs={
+                "a": (("a1", _mock_job_metadata({"v4": 1, "v3": 2})),),
+                "b": (
+                    ("b1", _mock_job_metadata({"v4": 3})),
+                    ("b2", _mock_job_metadata({"v4": 7})),
+                ),
+            },
+            resource_limits=[{"v3": 1}, {"v4": 1}, {"v3": 1}, {"v4": 3}],
+            project_quotas={"a": {}, "b": {}},
+            expected_project_limits={"a": {"v4": 1, "v3": 2}, "b": {"v4": 3}},
+            expected_verdicts={"a1": True, "b1": True, "b2": False},
+            expected_tiers={"a1": 2, "b1": 3, "b2": None},
+        ),
+        # Test that we acquire resources in reverse-tier-order.
+        dict(
+            project_jobs={
+                "a": (("a1", _mock_job_metadata({"v4": 1})),),
+                "b": (
+                    ("b1", _mock_job_metadata({"v4": 3})),
+                    ("b2", _mock_job_metadata({"v4": 1})),
+                ),
+            },
+            # b1 initially spans tier 0 and 1, but because it fits entirely into 1, only occupies 1
+            # and allows b2 to schedule onto tier 0.
+            resource_limits=[{"v4": 2}, {"v4": 3}],
+            project_quotas={"a": {}, "b": {}},
+            expected_project_limits={"a": {"v4": 1}, "b": {"v4": 4}},
+            expected_verdicts={"a1": True, "b1": True, "b2": True},
+            expected_tiers={"a1": 0, "b1": 1, "b2": 0},
+        ),
+        # Test that we acquire resources in reverse-tier-order (multiple resources).
+        dict(
+            project_jobs={
+                "a": (("a1", _mock_job_metadata({"v4": 1, "v3": 2})),),
+                "b": (
+                    ("b1", _mock_job_metadata({"v4": 3})),
+                    ("b2", _mock_job_metadata({"v4": 1})),
+                ),
+            },
+            # a1 spans tier 0-2, but only acquires resources from 2.
+            # This lets b1 schedule onto 0, and b2 onto 1.
+            resource_limits=[{"v4": 3}, {"v4": 2}, {"v3": 2}],
+            project_quotas={"a": {}, "b": {}},
+            expected_project_limits={"a": {"v4": 1, "v3": 2}, "b": {"v4": 4}},
+            expected_verdicts={"a1": True, "b1": True, "b2": True},
+            expected_tiers={"a1": 2, "b1": 0, "b2": 1},
+        ),
+        # Test scheduling jobs with no demands.
+        dict(
+            project_jobs={
+                "a": (("a1", _mock_job_metadata({})),),
+                "b": (
+                    ("b1", _mock_job_metadata({"v4": 2})),
+                    ("b2", _mock_job_metadata({})),
+                ),
+            },
+            expected_project_limits={"a": {}, "b": {"v4": 2}},
+            expected_verdicts={"a1": True, "b1": True, "b2": True},
+            expected_tiers={"a1": 0, "b1": 0, "b2": 0},
+        ),
+        # Test a case where some resource types are invalid.
+        dict(
+            project_jobs={
+                "a": (
+                    ("a1", _mock_job_metadata({"v4": 5})),
+                    ("a2", _mock_job_metadata({"v4": 10})),
+                ),
+                "b": (
+                    # b1 is unscheduable due to its demand on "unknown", but it will not prevent
+                    # b2 from being scheduled.
+                    ("b1", _mock_job_metadata({"unknown": 1})),
+                    ("b2", _mock_job_metadata({"v4": 1})),
+                ),
+            },
+            expected_project_limits={"a": {"v4": 5}, "b": {"unknown": 0, "v4": 1}},
+            expected_verdicts={"a1": True, "a2": False, "b1": False, "b2": True},
+            expected_tiers={"a1": 0, "a2": None, "b1": None, "b2": 0},
+        ),
+    )
+    def test_schedule(
+        self,
+        *,
+        project_jobs: dict,
+        expected_project_limits: dict,
+        expected_verdicts: dict,
+        expected_tiers: dict,
+        resource_limits: Optional[dict] = None,
+        project_quotas: Optional[dict] = None,
+    ):
+        sched: TierScheduler = TierScheduler.default_config().instantiate()
+        resource_limits = resource_limits or [{"v4": 10}, {"v4": 5}]
+        project_quotas = project_quotas or {"a": {"v4": 10}, "b": {"v4": 5}}
+
+        now = datetime.now()
+        for jobs in project_jobs.values():
+            for i, (_, job_metadata) in enumerate(reversed(jobs)):
+                # Jobs ordered in terms of oldest to newest.
+                job_metadata.creation_time = now - timedelta(seconds=i)
+
+        results = sched.schedule(
+            resource_limits=resource_limits,
+            project_quotas=project_quotas,
+            project_jobs=project_jobs,
+        )
+        # project_limits should reflect limits across tiers.
+        self.assertEqual(expected_project_limits, results.project_limits)
+        job_verdicts: Dict[str, JobVerdict] = {
+            job_name: verdict
+            for project_verdicts in results.job_verdicts.values()
+            for job_name, verdict in project_verdicts.items()
+        }
+        # Check that verdicts are expected.
+        self.assertEqual(
+            expected_verdicts,
+            {job_name: job_verdict.should_run() for job_name, job_verdict in job_verdicts.items()},
+        )
+        # Check that the tiers are expected.
+        self.assertEqual(
+            expected_tiers,
+            {
+                job_name: job_verdict.metadata.get("tier", None)
+                for job_name, job_verdict in job_verdicts.items()
+            },
+        )
+
+
+def _mock_get_resource_limits(*args):
+    del args
+    return UserQuotaInfo(
+        total_resources=[{"v4": 15, "v3": 8, "v5": 5}],
+        project_resources={
+            "project1": {"v4": 10, "v5": 5},
+            "project2": {"v4": 5, "v3": 5},
+            "project3": {"v3": 3},
+        },
+        project_membership={"project1": ["user1"], "project2": [], "project3": []},
+    )
+
+
+def mock_quota_config():
+    return _mock_get_resource_limits
+
+
+class TestJobScheduler(parameterized.TestCase):
+    """Tests JobScheduler."""
+
+    @parameterized.parameters(False, True)
+    def test_init(self, dry_run: bool):
+        cfg = JobScheduler.default_config().set(
+            quota=config_for_function(mock_quota_config),
+        )
+
+        # Test initialization.
+        sched: JobScheduler = cfg.instantiate()
+        # pylint: disable-next=protected-access
+        self.assertEqual(sched._quota(), _mock_get_resource_limits())
+
+        # Test scheduling.
+        yesterday = datetime.now() - timedelta(days=1)
+        jobs = {
+            # Should be deprioritized in favor of b, since it's using part of p2's v4 quota.
+            "a": JobMetadata(
+                user_id="a",
+                project_id="project1",
+                creation_time=yesterday + timedelta(seconds=1),
+                resources={"v4": 12},
+            ),
+            # Should run since there's v4 capacity in p2 after a is pre-empted.
+            "b": JobMetadata(
+                user_id="b",
+                project_id="project2",
+                creation_time=yesterday + timedelta(seconds=2),
+                resources={"v4": 5},
+            ),
+            # Should run, due to available v3 quota in p2 and p3.
+            "c": JobMetadata(
+                user_id="c",
+                project_id="project2",
+                creation_time=yesterday + timedelta(seconds=3),
+                resources={"v3": 6},
+            ),
+            # Should not run -- the excess v5 quota allocated is only 2.5.
+            "d": JobMetadata(
+                user_id="d",
+                project_id="project2",
+                creation_time=yesterday + timedelta(seconds=4),
+                resources={"v5": 4},
+            ),
+            # Should run -- within the 2.5 excess v5 quota.
+            "e": JobMetadata(
+                user_id="e",
+                project_id="project3",
+                creation_time=yesterday + timedelta(seconds=5),
+                resources={"v5": 2},
+            ),
+            # Should run. Even though it has no project, there is excess v3 quota.
+            "f": JobMetadata(
+                user_id="f",
+                project_id="",
+                creation_time=yesterday + timedelta(seconds=1),
+                resources={"v3": 2},
+            ),
+        }
+        results = sched.schedule(jobs, dry_run=dry_run, verbosity=1)
+
+        # Get verdicts by job name.
+        job_verdicts: Dict[str, JobVerdict] = {
+            job_name: verdict
+            for project_verdicts in results.job_verdicts.values()
+            for job_name, verdict in project_verdicts.items()
+        }
+        if dry_run:
+            # All of the jobs should be scheduled, regardless.
+            expected = {"a": True, "b": True, "c": True, "d": True, "e": True, "f": True}
+        else:
+            expected = {"a": False, "b": True, "c": True, "d": False, "e": True, "f": True}
+
+        self.assertEqual(
+            expected,
+            {job_name: job_verdict.should_run() for job_name, job_verdict in job_verdicts.items()},
+        )
+
+    def test_leftover(self):
+        quota_info = QuotaInfo(
+            total_resources=[{"gpu": 12}],
+            project_resources={
+                "project_a": {"gpu": 1},
+                "project_b": {"gpu": 1},
+                "project_c": {"gpu": 1},
+            },
+        )
+        cfg = JobScheduler.default_config().set(
+            quota=config_for_function(lambda: lambda *args: quota_info),
+        )
+
+        # Test initialization.
+        sched: JobScheduler = cfg.instantiate()
+        # pylint: disable-next=protected-access
+        self.assertEqual(sched._quota(), quota_info)
+
+        yesterday = datetime.now() - timedelta(days=1)
+
+        # Test basic left-over scheduling.
+        jobs = {
+            proj: JobMetadata(
+                user_id=f"user_{proj}",
+                project_id=f"project_{proj}",
+                creation_time=yesterday + timedelta(seconds=-index),
+                resources={"gpu": 5},
+            )
+            for index, proj in enumerate(["a", "b", "c"])
+        }
+        results = sched.schedule(jobs)
+        job_verdicts: Dict[str, JobVerdict] = {
+            job_name: verdict
+            for project_verdicts in results.job_verdicts.values()
+            for job_name, verdict in project_verdicts.items()
+        }
+        # Two of the older jobs should run, even though every job's demand exceeds the project
+        # limit.
+        self.assertEqual(
+            {"a": False, "b": True, "c": True},
+            {job_name: verdict.should_run() for job_name, verdict in job_verdicts.items()},
+        )
+
+        # Test more complicated scheduling.
+        jobs = {}
+        creation_time = {
+            "a1": 1,
+            "a2": 13,
+            "a3": 21,
+            "b1": 2,
+            "b2": 11,
+            "b3": 22,
+            "c1": 3,
+            "c2": 12,
+            "c3": 23,
+        }
+        for proj in ("a", "b", "c"):
+            # Each project has three jobs, with demand of 1, 5, 4 gpus each.
+            jobs.update(
+                {
+                    f"{proj}1": JobMetadata(
+                        user_id=f"user_{proj}",
+                        project_id=f"project_{proj}",
+                        creation_time=yesterday + timedelta(seconds=creation_time[f"{proj}1"]),
+                        resources={"gpu": 1},
+                    ),
+                    f"{proj}2": JobMetadata(
+                        user_id=f"user_{proj}",
+                        project_id=f"project_{proj}",
+                        creation_time=yesterday + timedelta(seconds=creation_time[f"{proj}2"]),
+                        resources={"gpu": 5},
+                    ),
+                    f"{proj}3": JobMetadata(
+                        user_id=f"user_{proj}",
+                        project_id=f"project_{proj}",
+                        creation_time=yesterday + timedelta(seconds=creation_time[f"{proj}3"]),
+                        resources={"gpu": 4},
+                    ),
+                }
+            )
+        results = sched.schedule(jobs)
+
+        # Get verdicts by job name.
+        job_verdicts: Dict[str, JobVerdict] = {
+            job_name: verdict
+            for project_verdicts in results.job_verdicts.values()
+            for job_name, verdict in project_verdicts.items()
+        }
+        expected = {
+            # The first job of each project will get scheduled.
+            "a1": True,
+            "b1": True,
+            "c1": True,
+            # Only "b2" will get scheduled since it's older than "a2" and "c2".
+            # "c2" cannot be scheduled because we will exceed the total resources.
+            "a2": False,
+            "b2": True,
+            "c2": False,
+            # At this point, "a2", "c3" and "b3" are at the front of their queues.
+            # "a2" is oldest but is deprioritized because it uses 5 gpus, compared to 4 gpus for
+            # "b3" and "c3", which would result in a larger "a" usage ratio.
+            # "b3" is next oldest but "b" is already utilizing 6 gpus, compared to just 1 for "c".
+            # Thus, we schedule "c3".
+            "a3": False,
+            "b3": False,
+            "c3": True,
+        }
+        self.assertEqual(
+            expected,
+            {job_name: job_verdict.should_run() for job_name, job_verdict in job_verdicts.items()},
+        )
+        self.assertEqual(
+            # Actual usages can be higher than the limits due to left-over scheduling.
+            {"project_a": {"gpu": 1}, "project_b": {"gpu": 6}, "project_c": {"gpu": 5}},
+            results.project_usages,
+        )

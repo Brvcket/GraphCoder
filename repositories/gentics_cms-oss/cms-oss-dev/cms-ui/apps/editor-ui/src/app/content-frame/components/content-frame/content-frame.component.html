@@ -1,0 +1,111 @@
+<div class="content-frame-container">
+
+    <gtx-editor-toolbar
+        [nodeInherited]="isInherited$ | async"
+        [currentNode]="currentNode"
+        [currentItem]="currentItem"
+        [editorState]="editorState$ | async"
+        [showSave]="saveButtonVisible"
+        [saveDisabled]="saveButtonIsDisabled"
+        [copyDisabled]="saveAsCopyButtonIsDisabled"
+        [locked]="isLocked"
+        [itemPermissions]="itemPermissions"
+        [itemLanguage]="itemLanguage"
+        (close)="closeEditor()"
+        (save)="handleItemSave($event)"
+        (timeManagement)="showTimeManagement($event)"
+    ></gtx-editor-toolbar>
+
+    <gtx-tabs
+        *ngIf="editMode === EditMode.EDIT_PROPERTIES && (currentItem?.type === 'file' || currentItem?.type === 'image')"
+        pure
+        class="properties-tabs"
+        [activeId]="propertiesTab$ | async"
+    >
+        <gtx-tab
+            id="preview"
+            [title]="'editor.preview_label' | i18n"
+            (select)="changePropertiesTab('preview')"
+        ></gtx-tab>
+
+        <gtx-tab
+            id="properties"
+            [title]="'editor.properties_label' | i18n"
+            (select)="changePropertiesTab('properties')"
+        ></gtx-tab>
+    </gtx-tabs>
+
+    <div
+        *ngIf="editMode === EditMode.EDIT_PROPERTIES && (currentItem?.type === 'file' || currentItem?.type === 'image')"
+        class="preview-form"
+        [class.hidden]="(propertiesTab$ | async) !== 'preview'"
+    >
+        <file-preview
+            [file]="(currentItem$ | async)"
+            (imageLoading)="isImageLoading = $event"
+        ></file-preview>
+    </div>
+
+    <div
+        *ngIf="editMode === EditMode.EDIT_PROPERTIES"
+        class="properties-form"
+        [class.hidden]="(propertiesTab$ | async) !== 'properties'"
+    >
+        <combined-properties-editor
+            [item]="currentItem"
+            [isDisabled]="!saveButtonVisible"
+        ></combined-properties-editor>
+    </div>
+
+    <div *ngIf="(editMode === EditMode.PREVIEW || editMode === EditMode.EDIT) && currentItem?.type === 'form'" class="form-editor">
+        <gtx-form-editor
+            class="form-editor"
+            [form]="currentItem"
+            [activeUiLanguageCode]="activeUiLanguageCode$ | async"
+            [activeContentLanguageCode]="itemLanguage?.code"
+            [readonly]="editMode !== EditMode.EDIT"
+            (formModified)="formChange($event)"
+            (validityChange)="setItemValidity($event)"
+        ></gtx-form-editor>
+    </div>
+
+    <div class="frame-wrapper" [class.hidden]="editMode === EditMode.EDIT_PROPERTIES || currentItem?.type === 'form'">
+        <gtx-progress-bar
+            class="frame-requesting"
+            [active]="requesting || !windowLoaded || (editMode === EditMode.EDIT && pageComparisonLanguage == null && !alohaWindowLoaded)"
+        ></gtx-progress-bar>
+
+        <gtx-loading-spinner
+            [visible]="requesting || !windowLoaded || (editMode === EditMode.EDIT && pageComparisonLanguage == null && !alohaWindowLoaded)"
+            [message]="(editMode === EditMode.EDIT ? 'editor.edit_mode_loading' : 'editor.preview_mode_loading' )| i18n"
+            [longerMessage]="'editor.loading_takes_more_time' | i18n"
+        ></gtx-loading-spinner>
+
+        <div class="frame-language-container" [class.hidden]="!comparePageId">
+            <iframe
+                #diffFrame
+                class="frame diff-frame"
+                name="diff-frame"
+            ></iframe>
+            <div class="frame-language-indicator">{{ pageComparisonLanguage?.name }}</div>
+        </div>
+
+        <div class="frame-language-container">
+            <iframe
+                #iframe
+                class="frame master-frame"
+                [attr.data-item-type]="currentItem?.type"
+                [attr.data-edit-mode]="editMode"
+                name="master-frame"
+                aria-hidden="false"
+            ></iframe>
+            <div class="frame-language-indicator" [class.hidden]="!comparePageId">{{ itemLanguage?.name }}</div>
+        </div>
+
+        <tag-editor-overlay-host></tag-editor-overlay-host>
+    </div>
+
+    <div class="hidden-file-picker" #filePickerWrapper>
+        <gtx-file-picker></gtx-file-picker>
+    </div>
+</div>

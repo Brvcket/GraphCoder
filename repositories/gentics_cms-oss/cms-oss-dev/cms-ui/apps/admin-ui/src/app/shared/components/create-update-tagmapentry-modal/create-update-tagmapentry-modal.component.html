@@ -1,0 +1,39 @@
+<div class="modal-title">
+    <h5 *ngIf="mode === 'create'">{{ 'modal.create_tagmapEntry_title' | i18n }}</h5>
+    <h5 *ngIf="mode === 'update'">{{ 'modal.update_tagmapEntry_title' | i18n }}</h5>
+</div>
+<div class="modal-content">
+    <gtx-tag-map-entry-properties
+        *ngIf="form"
+        [formControl]="form"
+        [mode]="mode"
+        [displayFields]="displayFields"
+    ></gtx-tag-map-entry-properties>
+</div>
+<div class="modal-footer">
+    <gtx-button
+        *ngIf="mode === 'create'"
+        type="primary"
+        [disabled]="!form.valid"
+        (click)="buttonCreateEntityClicked()"
+    >
+        {{ 'modal.create_button' | i18n }}
+    </gtx-button>
+
+    <gtx-button
+        *ngIf="mode === 'update'"
+        type="primary"
+        [disabled]="!form.valid"
+        (click)="buttonUpdateEntityClicked()"
+    >
+        {{ 'modal.save_button' | i18n }}
+    </gtx-button>
+
+    <gtx-button
+        type="secondary"
+        flat
+        (click)="cancelFn()"
+    >
+        {{ 'common.cancel_button' | i18n }}
+    </gtx-button>
+</div>

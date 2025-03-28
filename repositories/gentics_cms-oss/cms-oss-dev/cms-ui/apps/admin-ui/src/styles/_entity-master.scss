@@ -1,0 +1,95 @@
+@import 'variables';
+
+.gtx-entity-master-component {
+    display: block;
+    height: 100%;
+    width: 100%;
+}
+
+.gtx-entity-master {
+    .entity-table {
+        display: flex;
+        height: 100%;
+        height: 100%;
+        flex-direction: column;
+    }
+
+    .flex-container {
+        &.gtx-actions-common {
+            justify-content: flex-start;
+
+            gtx-button {
+                margin-right: 5px;
+
+                &.gtx-icon-only icon {
+                    font-size: 24px;
+                    color: $gtx-color-light-gray;
+                    transition: color 0.3s ease-in-out;
+
+                    &:hover {
+                        color: $gtx-color-very-dark-gray;
+                    }
+                }
+            }
+        }
+    }
+
+    > .gtx-component {
+        display: block;
+        height: 100%;
+        width: 100%;
+    }
+}
+
+.gtx-entity-master-loading-text {
+    position: absolute;
+    z-index: 3;
+    width: 100%;
+    top: 35vh;
+    text-align: center;
+    font-size: $gtx-font-size-lead;
+    color: $gtx-color-dark-gray;
+}
+
+.gtx-modal-datagrid-in-tab {
+    overflow-y: auto;
+    max-height: 100vh;
+
+    .modal-content {
+        overflow-x: hidden;
+    }
+
+    .modal-content {
+        max-width: 100%; // ensure that gtx-tab's 100% width matches width of modal-content's parent
+    }
+
+    ::ng-deep gtx-tabs {
+        overflow-x: hidden;
+    }
+}
+
+.gtx-modal-datagrid {
+    display: flex;
+    flex-direction: column;
+    flex-wrap: nowrap;
+    min-height: 1px;
+
+    .modal-title,
+    .modal-footer {
+        flex: 0 0;
+    }
+
+    .modal-content {
+        flex: 1 1 auto;
+        min-height: 1px;
+        display: flex;
+        overflow: hidden;
+        flex-direction: column;
+
+        .modal-table,
+        .modal-trable {
+            min-height: 1px;
+            display: flex;
+        }
+    }
+}

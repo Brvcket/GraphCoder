@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="colorPrimary">#ffde03</color>
+    <color name="colorPrimaryDark">#c7ad00</color>
+    <color name="colorAccent">#ffde03</color>
+
+    <color name="statusBarColor">@color/background</color>
+    <color name="statusBarColorTransparent">@android:color/transparent</color>
+
+    <color name="grayStatusBarColor">@color/grayBackground</color>
+
+    <color name="lightStatusBarColor">@color/lightBackground</color>
+
+    <color name="whiteStatusBarColor">@color/whiteBackground</color>
+
+    <color name="colorPrimaryGreen">#356858</color>
+    <color name="colorPrimaryGreenLighter">#478a74</color>
+
+    <color name="background">#222431</color>
+    <color name="darkerBackground">#14191E</color>
+    <color name="grayBackground">#292A2E</color>
+    <color name="lightBackground">#F6F6EF</color>
+    <color name="whiteBackground">#FFFFFF</color>
+
+    <color name="darkStoryColorNormal">#dfdfdf</color>
+    <color name="darkStoryColorDisabled">#99a</color>
+    <color name="darkTextColorHighlighted">#ccc</color>
+    <color name="darkTextColorDefault">#bbc</color>
+    <color name="darkTextColorDisabled">#889</color>
+    <color name="darkDividerColor">#22eeeeff</color>
+    <color name="darkDrawableColor">#fff</color>
+    <color name="darkOpCommentColor">#fff08c</color>
+    <color name="darkSelfCommentColor">#3c963c</color>
+
+    <color name="lightStoryColorNormal">#2f2f2f</color>
+    <color name="lightStoryColorDisabled">#777</color>
+    <color name="lightTextColorHighlighted">#3a3a3a</color>
+    <color name="lightTextColorDefault">#4a4a4a</color>
+    <color name="lightTextColorDisabled">#888</color>
+    <color name="lightDividerColor">#aaa</color>
+    <color name="lightDrawableColor">#bb000000</color>
+    <color name="lightOpCommentColor">#356858</color>
+    <color name="lightSelfCommentColor">#3f51b5</color>
+
+    <color name="commentIndentIndicatorColor1">#ffde03</color>
+    <color name="commentIndentIndicatorColor2">#3f51b5</color>
+    <color name="commentIndentIndicatorColor3">#ff0266</color>
+    <color name="commentIndentIndicatorColor4">#1EB980</color>
+    <color name="commentIndentIndicatorColor5">#00acc1</color>
+    <color name="commentIndentIndicatorColor6">#5d4037</color>
+    <color name="commentIndentIndicatorColor7">#d32f2f</color>
+
+    <color name="commentIndentIndicatorColor1light">#a14010</color>
+    <color name="commentIndentIndicatorColor2light">#3f51b5</color>
+    <color name="commentIndentIndicatorColor3light">#ff0266</color>
+    <color name="commentIndentIndicatorColor4light">#1EB980</color>
+    <color name="commentIndentIndicatorColor5light">#00acc1</color>
+    <color name="commentIndentIndicatorColor6light">#5d4037</color>
+    <color name="commentIndentIndicatorColor7light">#d32f2f</color>
+
+    <color name="commentIndentIndicatorColorMonochrome">#888</color>
+
+    <color name="material_you_900">#001E2C</color>
+    <color name="material_you_50">#E0F3FF</color>
+    <color name="material_you_600">#00668B</color>
+    <color name="material_you_secondary_100">#D1E5F4</color>
+    <color name="material_you_secondary_900">#091E28</color>
+    <color name="material_you_secondary_800">#20333D</color>
+    <color name="material_you_secondary_40">#4E616C</color>
+    <color name="material_you_secondary_70">#9AAEBB</color>
+
+    <color name="material_you_third_400">#8094A0</color>
+    <color name="material_you_third_700">#374955</color>
+
+    <color name="material_you_neutral_10">#FCFCFF</color>
+    <color name="material_you_neutral_50">#F0F0F3</color>
+    <color name="material_you_neutral_100">#E1E3E5</color>
+    <color name="material_you_neutral_800">#2E3133</color>
+    <color name="material_you_neutral_900">#191C1E</color>
+
+    <!-- Hard coded from system reference -->
+    <color name="material_you_neutral_variant20">#2A3136</color>
+    <color name="material_you_neutral_variant95">#EBF1F8</color>
+
+    <color name="material_you_primary60">#219BCC</color>
+    <color name="material_you_secondary60">#8094A0</color>
+    <color name="material_you_tertiary30">#484264</color>
+    <color name="material_you_tertiary50">#787296</color>
+    <color name="material_you_neutral_variant50">#70777C</color>
+
+    <color name="splash_screen_background">@color/material_you_neutral_50</color>
+</resources>

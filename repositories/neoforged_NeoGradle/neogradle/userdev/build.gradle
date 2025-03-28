@@ -1,0 +1,12 @@
+plugins {
+    id 'groovy'
+    id 'java-gradle-plugin'
+}
+
+dependencies {
+    api project(':common')
+    api project(':neoform')
+    api project(':dsl-userdev')
+}
+
+

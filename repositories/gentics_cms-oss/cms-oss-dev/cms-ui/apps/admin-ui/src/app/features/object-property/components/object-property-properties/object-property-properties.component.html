@@ -1,0 +1,95 @@
+<form
+    *ngIf="form"
+    [formGroup]="form"
+    class="row small-12 medium-12"
+>
+    <div class="input-container small-12 medium-4 columns">
+
+        <gtx-input
+            type="text"
+            maxlength="255"
+            [label]="('objectProperty.keyword' | i18n) + ' *'"
+            formControlName="keyword"
+        >
+        </gtx-input>
+
+        <gtx-select
+            [label]="('objectProperty.type' | i18n) + ' *'"
+            formControlName="type"
+            [clearable]="false"
+        >
+            <gtx-option *ngFor="let item of OBJECT_TYPES" [value]="item.id">{{ item.label | i18n }}</gtx-option>
+        </gtx-select>
+
+        <gtx-select
+            [label]="'objectProperty.objectPropertyCategory_singular' | i18n"
+            [clearable]="true"
+            formControlName="categoryId"
+        >
+            <gtx-option *ngFor="let item of (objectPropertyCategories$ | async)" [value]="item.id">{{ item.name }}</gtx-option>
+        </gtx-select>
+
+        <gtx-select
+            [label]="('objectProperty.construct' | i18n) + ' *'"
+            [clearable]="false"
+            formControlName="constructId"
+        >
+            <gtx-option *ngFor="let item of (constructs$ | async)" [value]="item.id">{{ item.name }}</gtx-option>
+        </gtx-select>
+
+        <gtx-checkbox
+            [label]="'objectProperty.required' | i18n"
+            formControlName="required"
+        ></gtx-checkbox>
+
+        <gtx-checkbox
+            *ngIf="form.get('inheritable').enabled"
+            [label]="'objectProperty.inheritable' | i18n"
+            formControlName="inheritable"
+        ></gtx-checkbox>
+
+        <gtx-checkbox
+            *ngIf="form.get('syncContentset').enabled"
+            [label]="'objectProperty.syncContentset' | i18n"
+            formControlName="syncContentset"
+        ></gtx-checkbox>
+
+        <gtx-checkbox
+            *ngIf="form.get('syncChannelset').enabled"
+            [label]="'objectProperty.syncChannelset' | i18n"
+            formControlName="syncChannelset"
+        ></gtx-checkbox>
+
+        <gtx-checkbox
+            *ngIf="form.get('syncVariants').enabled"
+            [label]="'objectProperty.syncVariants' | i18n"
+            formControlName="syncVariants"
+        ></gtx-checkbox>
+
+    </div>
+
+    <div class="input-container small-12 medium-8 columns">
+
+        <gtx-i18n-panel-group
+            *ngIf="languages$ | async as languagesAsync"
+            [languages]="languagesAsync"
+            [invalidLanguages]="invalidLanguages"
+            [(activeLanguage)]="activeTabI18nLanguage"
+        >
+            <gtx-i18n-input
+                [label]="('common.name' | i18n) + ' *'"
+                formControlName="nameI18n"
+                [language]="activeTabI18nLanguage?.code"
+                [requiredInCurrentLanguage]="true"
+                [availableLanguages]="languages"
+            ></gtx-i18n-input>
+
+            <gtx-i18n-input
+                [label]="'common.description' | i18n"
+                formControlName="descriptionI18n"
+                [language]="activeTabI18nLanguage?.code"
+                [availableLanguages]="languages"
+            ></gtx-i18n-input>
+        </gtx-i18n-panel-group>
+    </div>
+</form>

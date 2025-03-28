@@ -1,0 +1,22 @@
+<form
+    *ngIf="form"
+    [formGroup]="form"
+    class="row small-12 medium-12"
+>
+    <div *ngIf="supportedLanguages" class="input-container small-12 medium-12 columns">
+        <gtx-i18n-panel-group
+            *ngIf="supportedLanguages"
+            [languages]="supportedLanguages"
+            [invalidLanguages]="invalidLanguages"
+            [(activeLanguage)]="activeTabI18nLanguage"
+        >
+            <gtx-i18n-input
+                [label]="('common.name' | i18n) + ' *'"
+                formControlName="nameI18n"
+                [requiredInCurrentLanguage]="true"
+                [language]="activeTabI18nLanguage?.code"
+                [availableLanguages]="supportedLanguages"
+            ></gtx-i18n-input>
+        </gtx-i18n-panel-group>
+    </div>
+</form>

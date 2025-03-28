@@ -1,0 +1,42 @@
+<ng-container *ngFor="let branch of branches">
+    <gtx-dropdown-item
+        *ngIf="useLinks"
+        [ngClass]="'depth-' + depth"
+        [routerLink]="['/editor', { outlets: { list: ['node', branch.node.id, 'folder', branch.node.folderId || branch.node.id] } }]"
+        (click)="nodeSelected.emit(branch.node)"
+    >
+        <a
+            [title]="branch?.folder?.description"
+            [routerLink]="['/editor', { outlets: { list: ['node', branch.node.id, 'folder', branch.node.folderId || branch.node.id] } }]"
+            (click)="nodeSelected.emit(branch.node)"
+        >
+            <div *ngIf="0 < depth" class="inherited-icon">
+                <icon>input</icon>
+            </div>
+            {{ branch.node.name }}
+        </a>
+    </gtx-dropdown-item>
+
+    <gtx-dropdown-item
+        *ngIf="!useLinks"
+        [ngClass]="'depth-' + depth"
+        (click)="nodeSelected.emit(branch.node)"
+    >
+        <a
+            [title]="branch.folder?.description"
+            (click)="nodeSelected.emit(branch.node)"
+        >
+            <div *ngIf="0 < depth" class="inherited-icon">
+                <icon>input</icon>
+            </div>
+            {{ branch.node.name }}
+        </a>
+    </gtx-dropdown-item>
+
+    <node-selector-tree
+        [branches]="branch.children"
+        [depth]="depth + 1"
+        [useLinks]="useLinks"
+        (nodeSelected)="nodeSelected.emit($event)"
+    ></node-selector-tree>
+</ng-container>

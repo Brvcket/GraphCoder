@@ -1,0 +1,16 @@
+.uploaded-files {
+    margin-top: 5px;
+    margin-bottom: 5px;
+}
+
+expansion-button {
+    margin-right: 10px;
+
+    gtx-input.subfolder-name {
+        margin-top: 5px;
+
+        ::ng-deep input[type=text] {
+            margin-bottom: 5px;
+        }
+    }
+}

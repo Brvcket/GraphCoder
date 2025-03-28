@@ -1,0 +1,24 @@
+<div class="tag-editor">
+    <div
+        class="tag-wrapper"
+        [class.nonActive]="!editedTag?.active"
+        [class.tagfillLightEnabled]="(tagfillLightEnabled$ | async)"
+    >
+        <div *ngIf="!(tagfillLightEnabled$ | async)" class="activate-obj-prop">
+            <gtx-checkbox
+                [label]="'editor.obj_prop_active_label' | i18n"
+                [checked]="editedTag?.active"
+                [disabled]="!(itemPermissions.edit) || (editedTag?.readOnly)"
+                (change)="toggleDisplayContent()"
+            ></gtx-checkbox>
+        </div>
+        <tag-editor-host
+            *ngIf="(tagToEdit$ | async)?.tag?.tagType; else tagTypeLoadError"
+            [showTitle]="showTitle$ | async"
+        ></tag-editor-host>
+    </div>
+
+    <ng-template #tagTypeLoadError>
+        <span>{{ 'editor.properties_error_loading_tagtype' | i18n }}</span>
+    </ng-template>
+</div>

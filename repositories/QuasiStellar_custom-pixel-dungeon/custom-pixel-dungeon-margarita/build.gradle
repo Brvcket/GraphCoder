@@ -1,0 +1,38 @@
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        classpath 'com.android.tools.build:gradle:7.4.2'
+    }
+}
+
+allprojects {
+
+    ext {
+        appName = 'Custom Pixel Dungeon'
+        appPackageName = 'com.qsr.customspd'
+
+        appVersionCode = 10
+        appVersionName = '2.1.0-1.0'
+
+        appJavaCompatibility = JavaVersion.VERSION_1_8
+
+        appAndroidCompileSDK = 33
+        appAndroidMinSDK = 19
+        appAndroidTargetSDK = 33
+
+        gdxVersion = '1.11.0'
+        gdxControllersVersion = '2.2.4-SNAPSHOT'
+        robovmVersion = '2.3.19'
+    }
+    version = appVersionName
+
+    repositories {
+        google()
+        mavenCentral()
+        maven { url 'https://oss.sonatype.org/content/repositories/snapshots' }
+    }
+
+}

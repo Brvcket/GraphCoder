@@ -698,7 +698,7 @@ def create_graph(code_lines, repo_name):
 
     # remove comment
     comment_prefix = ""
-    if language == "python":
+    if CONSTANTS.repos_language[repo_name] == "python":
         comment_prefix = "#"
     elif language == "java":
         comment_prefix = "//"
@@ -728,7 +728,7 @@ def create_graph(code_lines, repo_name):
     # Initialize program dependence graph
     ccg = nx.MultiDiGraph()
 
-    if language == 'python':
+    if CONSTANTS.repos_language[repo_name] == "python":
         # Construct control dependence edge
         for child in tree.root_node.children:
             python_control_dependence_graph(child, ccg, code_lines, None)

@@ -1,0 +1,9 @@
+{
+	"name": "Old Potions",
+	"version": 1,
+	"description": "The Dungeon is running out of potion bottles. The only ones left are of an older revision!",
+	"author": "QuasiStellar",
+	"license": "GPLv3",
+	"gameplay_mod": false,
+	"min_cpd_version": 3
+}

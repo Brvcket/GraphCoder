@@ -1,0 +1,70 @@
+h2. Part Types in Gentics CMS
+
+This section contains an overview over existing part types. These part types can be used to create tagtypes. Part types are the essential building blocks of tagtypes.
+
+endprologue.
+
+h3. Overview
+
+|_. Type Id |_. Type Name             |_. Description |
+|  1        | Text                    | Used for normal text (without HTML), which is entered using the tagfill dialog. Linebreaks will be transformed into &lt;br&gt; tags while rendering. |
+|  4        | Page                    | The URL (page) part type provides an element to select a page within any accessible folder. |
+|  6        | Image                   | Reference an image. |
+|  8        | File                    | Reference a file. |
+| 13        | Overview                | The overview part type creates and overview which can be configured using a the provided wizard. **WARNING:** Cannot be used together with other tag parts that are set as editable. |
+| 21        | HTML                    | Used for text containing HTML tags, which is entered using the tagfill dialog or Aloha Editor. No conversion will be done while rendering. |
+| 25        | Folder                  | This part can be used to select a folder. |
+| 29        | Select (single)         | This part type provides static datasources from which a user can pick a single value. |
+| 30        | Select (multiple)       | This part type provides static datasources from which a user can pick multiple values. |
+| 31        | Checkbox                | Part type for input of boolean value. |
+| 32        | Datasource              | With this part type, the user can define individual datasources in the tag. |
+| 33        | Velocity                | The velocity part type can be used to evaluate all previously generated text using the velocity markup parser. |
+| 40        | Node                    | The node part is a drop-down menu with the nodes available to the user. |
+| 42        | Form                    | The CMS Form part lets the user select a form from the CMS. See "Gentics CMS Forms":feature_forms.html for details. **NOTE:** Parts of this type can only be used in the new Editor User Interface. |
+
+NOTE: Inline editable parts - which are transformed to editables in Aloha Editor - should only use the part type @HTML@.
+
+h3. Velocity Part Type
+
+An example for this tag part type can be found within the demo server in the folder "Demo-CMS-Projekt/Home/Node Tags".
+
+* Parameter "template"
+* Type: HTML lang
+* Content: The Velocity Template Code that should be rendered by the visible Velocity Part Type.
+
+* Parameter "macros":
+* Type: HTML lang
+* Content: VTL Macros which can be used within the implementation.
+
+Example Velocity Tagtyp:
+
+* Part 1: Typ Velocity, Keyword vtl, Visible
+* Part 2: Typ HTML lang, Keyword template, Not visible
+* Part 3: Typ HTML lang, Keyword macros, Not visible
+
+Errors within the velocity implementation will be diplayed within the Gentics CMS im "error stream".
+
+NOTE: Use always the __.toString()__ method when comparing two tags within a __#if()__ command.
+
+Example:
+
+<shell>
+#if( $cms.page.object.myprop.toString() == "test" )
+</shell>
+
+h3. Custom Part Type Implementations
+
+Custom part types can be created using the AbstractExtensiblePartType class.
+
+To use extensible parttypes you need to insert a row into the type table of the cms database.
+Please note that once the row has been inserted, any changes to the row, such as updating
+the class name, require a CMS restart (the part type information is cached internally).
+
+To avoid id conflicts please calculate your personal id range for now:
+ * Take the 1st 4 characters of one of the customers cms license keys.
+ * Convert them from hex to dec.
+ * Multiply by 1000. this is the lowest allowed id.
+ * Add 999. thid is the highest allowed id.
+ * E.g: license key is A2B4-xxxx-xxxx...
+ * HEX a2b4 is 41652 in decimal.
+ * Your personal id range is 41652000 - 41652999.

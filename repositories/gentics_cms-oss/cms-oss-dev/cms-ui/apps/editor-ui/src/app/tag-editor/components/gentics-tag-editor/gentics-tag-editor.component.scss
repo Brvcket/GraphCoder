@@ -1,0 +1,54 @@
+:host {
+    width: 100%;
+    flex-grow: 1;
+    display: flex;
+    overflow: hidden;
+}
+
+.container {
+    display: flex;
+    flex-direction: column;
+    flex-wrap: nowrap;
+    width: 100%;
+    height: 100%;
+    max-width: unset;
+    gap: 20px;
+
+    .header {
+        flex-shrink: 0;
+        padding: 0 20px;
+    }
+
+    .tag-property-editors {
+        flex-grow: 1;
+        overflow: auto;
+        min-height: 2em;
+        display: flex;
+        flex-direction: column;
+        flex-wrap: nowrap;
+        gap: 10px;
+
+        .tag-property-editor-row {
+            padding: 0 20px;
+
+            ::ng-deep gtx-radio-button [type=radio], ::ng-deep gtx-checkbox [type=checkbox] {
+                display: none;
+            }
+        }
+    }
+
+    .footer {
+        flex-shrink: 0;
+        display: flex;
+        flex-direction: row;
+        flex-wrap: nowrap;
+        gap: 15px;
+        justify-content: flex-end;
+        padding: 0 20px 5px;
+
+        .delete-button {
+            margin-right: auto;
+        }
+    }
+}
+

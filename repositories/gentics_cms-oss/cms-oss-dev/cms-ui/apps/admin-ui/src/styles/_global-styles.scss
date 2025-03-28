@@ -1,0 +1,81 @@
+@import "variables";
+
+//
+// Style rules which apply app-wide go here.
+//
+
+html, body {
+    overflow-y: hidden;
+}
+
+gtx-toast > .gtx-toast {
+    z-index: 1000;
+}
+
+// Used by the ActionAllowedDirective to hide elements, for which the user does not have enough permissions.
+.gtx-action-no-perms-hidden {
+    display: none;
+}
+
+.gtx-modal-dialog.visible {
+    overflow: hidden;
+}
+
+.message-unauthorized {
+    height: 100%;
+    min-height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding-bottom: 20rem;
+
+    icon {
+        font-size: 4rem;
+        color: $gtx-color-alert;
+    }
+}
+
+/* Fix difference between gtx-input and gtx-textarea */
+gtx-select {
+    label {
+        font-size: $label-font-size;
+    }
+}
+
+// Jumping screen after clicking on a checkbox fix
+gtx-checkbox > div {
+    transform: translateZ(0);
+}
+
+gtx-tabs {
+    display: flex !important;
+    flex-direction: column;
+    flex-wrap: nowrap;
+
+    > gtx-tab {
+        flex: 0 0;
+        height: calc(100% - 28px);
+
+        > .tab-content.is-active {
+            display: block;
+            height: 100%;
+        }
+    }
+
+    > .tab-links > .tab-link.is-active {
+        border-bottom-color: $gtx-color-warning !important;
+        color: $gtx-color-very-dark-gray !important;
+    }
+}
+
+.gtx-entity-list {
+    display: block;
+    height: 100%;
+    width: 100%;
+}
+
+.gtx-entity-master {
+    display: block;
+    height: 100%;
+}

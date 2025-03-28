@@ -1,0 +1,30 @@
+plugins {
+    id 'groovy'
+    id 'java-gradle-plugin'
+}
+
+dependencies {
+    api project(':utils')
+    api project(':dsl-common')
+
+    api "commons-io:commons-io:${project.commons_io_version}"
+    api "com.google.code.gson:gson:${project.gson_version}"
+    api "com.google.guava:guava:${project.guava_version}"
+    api "de.siegmar:fastcsv:${project.fastcsv_version}"
+    api ("net.minecraftforge:unsafe:${project.unsafe_version}") {
+        transitive = false
+    }
+    api "org.apache.maven:maven-artifact:${project.maven_artifact_version}"
+    api "org.apache.ivy:ivy:${project.ivy_artifact_version}"
+    api "org.apache.httpcomponents:httpclient:${project.httpclient_version}"
+    api "net.minecraftforge:srgutils:${project.srgutils_version}"
+    api "codechicken:DiffPatch:${project.diffpatch_version}"
+    api "commons-codec:commons-codec:${project.commons_codec_version}"
+    api "net.neoforged:EclipseLaunchConfigs:${project.eclipse_launch_configs_version}"
+    api "net.neoforged:JarJarMetadata:${project.jarjar_version}"
+    api "net.neoforged:JarJarSelector:${project.jarjar_version}"
+
+    // IDE support
+    api "gradle.plugin.org.jetbrains.gradle.plugin.idea-ext:gradle-idea-ext:${project.gradle_idea_extension_version}"
+}
+
