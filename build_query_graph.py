@@ -24,7 +24,6 @@ def build_query_subgraph(task_name):
     tokenizer = CodexTokenizer()
     with tqdm(total=len(test_cases)) as pbar:
         for case in test_cases:
-            print(case)
             # read full query context
             case_path = os.path.join(*case['metadata']['fpath_tuple'])
             line_no = case['metadata']['line_no']
