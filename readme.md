@@ -2,7 +2,7 @@
 
 ## Overview
 
-In this paper, we propose GraphCoder, a retrieval-augmented code completion framework that leverages LLMs' general code knowledge and the repository-specific knowledge via a graph-based retrieval-generation process. In particular, GraphCoder captures the context of completion target through code context graph (CCG) that consists of control-flow and data/control-dependence between code statements, a more structured way to capture the completion target context than the sequence-based context used in existing retrieval-augmented approaches; based on CCG, GraphCoder further employs a coarse-to-fine retrieval process to locate context-similar code snippets with the completion target from the current repository.
+Fork with fixed bugs
 
 ## Project Structure
 
@@ -51,6 +51,8 @@ The structure of this project is shown as follows:
 ```
 
 ## Quick Start
+
+Example of usage can be found in bash.ipynb
 
 #### Step 1: Install Requirements
 
@@ -113,4 +115,37 @@ An example for running code generation
 
 ```
 python generate_response.py --input_file_name api_level.python.coarse2fine.10 --model gpt-3.5-turbo-instruct --mode retrieval --max_top_k 10 --max_new_tokens 100
+```
+
+### Step 5: Evaluation
+
+```python
+from utils.metrics import compute_identifier_match, compute_EM, compute_ES
+from utils.utils import load_jsonl
+
+def evaluate(target, prediction):
+    em_val = 0
+    f1_val = 0
+    code_em_val = 0
+    code_es_val = 0
+    for i in range(0, len(prediction)):
+        pred_case = prediction[i]
+        pred_str = pred_case['generate_response']
+        gt_str = target[i]['metadata']['ground_truth']
+        
+        em, f1 = compute_identifier_match(pred_str, gt_str, language="python")
+        em_val += em
+        f1_val += f1
+    
+        code_em = compute_EM(gt_str, pred_str, language="python")
+        code_es = compute_ES(gt_str, pred_str, language="python")
+        code_em_val += code_em
+        code_es_val += code_es
+        
+    return code_em_val/len(prediction), code_es_val/len(prediction), em_val / len(prediction), f1_val/len(prediction)
+
+target = load_jsonl(target_path)
+prediction = load_jsonl(responses_save_name)
+
+evaluate(target, prediction)
 ```
