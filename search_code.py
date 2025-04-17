@@ -161,7 +161,9 @@ class CodeSearchWorker:
 
     def _find_top_k_context_two_phase(self, query_case):
         repo_name = query_case['metadata']['task_id'].split('/')[0]
+        print(os.path.join(CONSTANTS.graph_database_save_dir, f"{repo_name}.jsonl"))
         repo_cases = load_jsonl(os.path.join(CONSTANTS.graph_database_save_dir, f"{repo_name}.jsonl"))
+        print(f"repo_cases: {repo_cases}")
         text_runtime_start = time.time()
         with ThreadPoolExecutor(max_workers=32) as executor:
             compute_sim = partial(self._text_jaccard_similarity_wrapper, query_case)
@@ -169,6 +171,8 @@ class CodeSearchWorker:
             top_k_context_phase1 = list(futures)
         top_k_context_phase1 = sorted(top_k_context_phase1, key=lambda x: x[1], reverse=False)[-self.max_top_k:]
         text_runtime_end = time.time()
+
+        print(f"top_k_context_phase1: {top_k_context_phase1}")
 
         with ThreadPoolExecutor(max_workers=32) as executor:
             compute_sim = partial(self._graph_node_prior_similarity_wrapper, query_case)
@@ -178,12 +182,16 @@ class CodeSearchWorker:
             futures = executor.map(compute_sim, top_k_cases)
             top_k_context_phase2 = list(futures)
 
+        print(f"top_k_context_phase2: {top_k_context_phase2}")
+
         top_k_context_filtered = []
         for repo_case, sim in top_k_context_phase2:
             if sim >= self.remove_threshold:
                 top_k_context_filtered.append((repo_case['val'], repo_case['statement'],
                                                repo_case['key_forward_context'], repo_case['fpath_tuple'], sim))
         top_k_context_filtered = sorted(top_k_context_filtered, key=lambda x: x[-1], reverse=False)
+
+        print(f"top_k_context_filtered: {top_k_context_filtered}")
 
         query_case['top_k_context'] = top_k_context_filtered[-self.max_top_k:]
 
@@ -205,6 +213,7 @@ class CodeSearchWorker:
             for query_case in self.query_cases:
                 res = self._find_top_k_context_two_phase(query_case)
                 query_lines_with_retrieved_results.append(copy.deepcopy(res))
+                break
         dump_jsonl(query_lines_with_retrieved_results, self.output_path)
 
 
@@ -215,6 +224,7 @@ if __name__ == '__main__':
     args_parser.add_argument('--mode', type=str, default='coarse2fine')
     args_parser.add_argument('--gamma', default=0.1, type=float)
     args = args_parser.parse_args()
+    print('a')
 
     build_query_subgraph(f"{args.query_cases}.test.jsonl")
 

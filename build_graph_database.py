@@ -78,7 +78,7 @@ class GraphDatabaseBuilder:
                     repo_dict.append(curr_dict.copy())
                 pbar.update(1)
 
-        save_name = os.path.join(self.graph_database_save_dir, f"{repo}.jsonl")
+        save_name = os.path.join(self.graph_database_save_dir, f"{repo_name}.jsonl")
         make_needed_dir(save_name)
         dump_jsonl(repo_dict, save_name)
         return

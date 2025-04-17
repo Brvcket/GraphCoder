@@ -20,6 +20,7 @@ def last_n_context_lines_graph(graph: nx.MultiDiGraph):
 
 def build_query_subgraph(task_name):
     test_cases = load_jsonl(os.path.join(CONSTANTS.dataset_dir, task_name))
+    test_cases = test_cases[0:2]
     graph_test_cases = []
     tokenizer = CodexTokenizer()
     with tqdm(total=len(test_cases)) as pbar:
