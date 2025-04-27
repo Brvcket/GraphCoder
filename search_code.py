@@ -1,293 +1,256 @@
-from concurrent.futures import ThreadPoolExecutor
 import os
-from utils.utils import CONSTANTS, dump_jsonl, json_to_graph, CodexTokenizer, load_jsonl, make_needed_dir
 import copy
-import networkx as nx
 import queue
-import Levenshtein
-import argparse
 import time
+import numpy as np
+import torch
+import networkx as nx
+from concurrent.futures import ThreadPoolExecutor
+from transformers import AutoTokenizer, AutoModel
+from utils.utils import CONSTANTS, dump_jsonl, json_to_graph, load_jsonl, make_needed_dir
 from utils.metrics import hit
+from Levenshtein import distance as levenshtein_distance
+
+from Levenshtein import distance as levenshtein_distance
 from functools import partial
 from build_query_graph import build_query_subgraph
-import torch
-from transformers import AutoTokenizer, AutoModel
-import numpy as np
+import argparse
 
 
+# --- Similarity Functions ---
+def cosine_similarity(a, b):
+    norm1 = np.linalg.norm(a)
+    norm2 = np.linalg.norm(b)
+    return 0.0 if norm1 == 0 or norm2 == 0 else np.dot(a, b) / (norm1 * norm2)
+
+
+def dot_product(a, b):
+    return float(np.dot(a, b))
+
+
+def l2_distance(a, b):
+    return -float(np.linalg.norm(a - b))
+
+
+def l1_distance(a, b):
+    return -float(np.linalg.norm(a - b, ord=1))
+
+
+# --- Embedders ---
 class CodeEmbedder:
-    def __init__(self):
+    def __init__(self, model_name="Salesforce/codet5p-110m-embedding", max_length=512):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.tokenizer = AutoTokenizer.from_pretrained("Salesforce/codet5p-110m-embedding", trust_remote_code=True)
-        self.model = AutoModel.from_pretrained("Salesforce/codet5p-110m-embedding", trust_remote_code=True).to(self.device)
-        
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+        self.model = AutoModel.from_pretrained(model_name, torch_dtype=torch.float16, trust_remote_code=True).to(
+            self.device)
+        self.max_length = max_length
+        # default sim_fn
+        self.sim_fn = cosine_similarity
+
     def get_embedding(self, code_text):
-        inputs = self.tokenizer(code_text, return_tensors="pt", truncation=True, 
-                                max_length=512, padding="max_length").to(self.device)
+        inputs = self.tokenizer(code_text, return_tensors="pt", truncation=True,
+                                max_length=self.max_length, padding="max_length").to(self.device)
         with torch.no_grad():
             outputs = self.model(**inputs)
         return outputs.cpu().numpy()[0]
-    
-    @staticmethod
-    def cosine_similarity(vec1, vec2):
-        norm1 = np.linalg.norm(vec1)
-        norm2 = np.linalg.norm(vec2)
-        if norm1 == 0 or norm2 == 0:
-            return 0.0
-        return np.dot(vec1, vec2) / (norm1 * norm2)
 
 
+# --- Similarity & Embedding Manager ---
 class SimilarityScore:
     _embedder = None
-    
+
     @classmethod
-    def get_embedder(cls):
-        if cls._embedder is None:
-            cls._embedder = CodeEmbedder()
+    def set_embedder(cls, choice="codet5"):
+        if choice == "codet5":
+            cls._embedder = CodeEmbedder("Salesforce/codet5p-110m-embedding", max_length=512)
+        elif choice == "codebert":
+            cls._embedder = CodeEmbedder("microsoft/codebert-base", max_length=512)
+        elif choice == "graphcodebert":
+            cls._embedder = CodeEmbedder("microsoft/graphcodebert-base", max_length=512)
+        elif choice == "starcoder":
+            cls._embedder = CodeEmbedder("bigcode/starcoder", max_length=2048)
+        else:
+            cls._embedder = CodeEmbedder()  # fallback
         return cls._embedder
-    
-    @staticmethod
-    def text_edit_similarity(str1: str, str2: str):
-        return 1 - Levenshtein.distance(str1, str2) / max(len(str1), len(str2))
+
+    @classmethod
+    def set_similarity_metric(cls, metric="cosine"):
+        sim_map = {
+            'cosine': cosine_similarity,
+            'dot': dot_product,
+            'l2': l2_distance,
+            'l1': l1_distance
+        }
+        sim_fn = sim_map.get(metric, cosine_similarity)
+        # assign to embedder instance
+        cls._embedder.sim_fn = sim_fn
 
     @staticmethod
     def text_jaccard_similarity(list1, list2):
-        set1 = set(list1)
-        set2 = set(list2)
-        intersection = len(set1.intersection(set2))
-        union = len(set1.union(set2))
-        return float(intersection) / union
+        set1, set2 = set(list1), set(list2)
+        return float(len(set1.intersection(set2)) / len(set1.union(set2)))
 
     @staticmethod
-    def subgraph_edit_similarity(query_graph: nx.MultiDiGraph, graph: nx.MultiDiGraph, gamma=0.1):
-        # To ensure the consistency of sorting scores implementation in the next step, the SED can be straightforwardly transformed into subgraph edit similarity.
+    def text_edit_similarity(str1, str2):
+        return 1 - levenshtein_distance(str1, str2) / max(len(str1), len(str2))
+
+    @classmethod
+    def subgraph_edit_similarity(cls, query_graph: nx.MultiDiGraph, graph: nx.MultiDiGraph, gamma=0.1):
         query_root = max(query_graph.nodes)
         root = max(graph.nodes)
-        
-        # Get embedder instance
-        embedder = SimilarityScore.get_embedder()
-        
-        # Get embeddings instead of tokenization
+        embedder = cls._embedder
+        # get codes
         query_code = "".join(query_graph.nodes[query_root]['sourceLines'])
         graph_code = "".join(graph.nodes[root]['sourceLines'])
-        
-        query_embedding = embedder.get_embedding(query_code)
-        graph_embedding = embedder.get_embedding(graph_code)
-        
-        # Calculate cosine similarity instead of Jaccard
-        node_sim = embedder.cosine_similarity(query_embedding, graph_embedding)
+        # compute node similarity via chosen sim_fn
+        q_emb = embedder.get_embedding(query_code)
+        g_emb = embedder.get_embedding(graph_code)
+        node_sim = embedder.sim_fn(q_emb, g_emb)
 
-        node_match = dict()
+        # BFS matching
+        node_match = {query_root: (root, 0)}
         match_queue = queue.Queue()
         match_queue.put((query_root, root, 0))
-        node_match[query_root] = (root, 0)
-
-        query_graph_visited = {query_root}
-        graph_visited = {root}
-
-        graph_nodes = set(graph.nodes)
+        visited_q, visited_g = {query_root}, {root}
+        all_g_nodes = set(graph.nodes)
 
         while not match_queue.empty():
             v, u, hop = match_queue.get()
-            v_neighbors = (set(query_graph.neighbors(v)) | set(query_graph.predecessors(v))) - set(query_graph_visited)
-            u_neighbors = graph_nodes - set(graph_visited)
-
-            sim_score = []
-            for vn in v_neighbors:
-                for un in u_neighbors:
-                    query_code = "".join(query_graph.nodes[vn]['sourceLines'])
-                    graph_code = "".join(graph.nodes[un]['sourceLines'])
-                    
-                    query_embedding = embedder.get_embedding(query_code)
-                    graph_embedding = embedder.get_embedding(graph_code)
-                    
-                    sim = embedder.cosine_similarity(query_embedding, graph_embedding)
-                    sim_score.append((sim, vn, un))
-            sim_score.sort(key=lambda x: -x[0])
-            for sim, vn, un in sim_score:
-                if vn not in query_graph_visited and un not in graph_visited:
-                    match_queue.put((vn, un, hop + 1))
-                    node_match[vn] = (un, hop + 1)
-                    query_graph_visited.add(vn)
-                    graph_visited.add(un)
-                    v_neighbors.remove(vn)
-                    u_neighbors.remove(un)
-                    node_sim += (gamma ** (hop + 1)) * sim
-                if len(v_neighbors) == 0 or len(u_neighbors) == 0:
+            q_neighbors = (set(query_graph.neighbors(v)) | set(query_graph.predecessors(v))) - visited_q
+            g_candidates = all_g_nodes - visited_g
+            sims = []
+            for qn in q_neighbors:
+                q_code = "".join(query_graph.nodes[qn]['sourceLines'])
+                q_emb = embedder.get_embedding(q_code)
+                for gn in g_candidates:
+                    g_code = "".join(graph.nodes[gn]['sourceLines'])
+                    g_emb = embedder.get_embedding(g_code)
+                    sims.append((embedder.sim_fn(q_emb, g_emb), qn, gn))
+            sims.sort(key=lambda x: -x[0])
+            for sim_val, qn, gn in sims:
+                if qn not in visited_q and gn not in visited_g:
+                    node_sim += (gamma ** (hop + 1)) * sim_val
+                    match_queue.put((qn, gn, hop + 1))
+                    node_match[qn] = (gn, hop + 1)
+                    visited_q.add(qn)
+                    visited_g.add(gn)
                     break
-            if len(v_neighbors) != 0:
-                for vn in v_neighbors:
-                    node_match[vn] = None
-                    query_graph_visited.add(vn)
 
+        # edge similarity
         edge_sim = 0
-        for v in query_graph.nodes:
-            if v not in node_match.keys():
-                node_match[v] = None
-        for v_query, u_query, t in query_graph.edges:
-            if node_match[v_query] is not None and node_match[u_query] is not None:
-                v, hop_v = node_match[v_query]
-                u, hop_u = node_match[u_query]
-                if graph.has_edge(v, u, t):
-                    edge_sim += (gamma ** hop_v)
-
-        graph_sim = node_sim + edge_sim
-        return graph_sim
+        for v_q, u_q, k in query_graph.edges:
+            m_v = node_match.get(v_q)
+            m_u = node_match.get(u_q)
+            if m_v and m_u and graph.has_edge(m_v[0], m_u[0], key=k):
+                edge_sim += (gamma ** m_v[1])
+        return node_sim + edge_sim
 
 
+# --- Code Search Worker ---
 class CodeSearchWorker:
-    def __init__(self, query_cases, output_path, mode, gamma=None, max_top_k=CONSTANTS.max_search_top_k, remove_threshold=0):
+    def __init__(self, query_cases, output_path, mode, gamma=None,
+                 max_top_k=CONSTANTS.max_search_top_k, remove_threshold=0,
+                 embedder_choice='codet5', similarity_metric='cosine'):
         self.query_cases = query_cases
         self.output_path = output_path
-        self.max_top_k = max_top_k
-        self.remove_threshold = remove_threshold
         self.mode = mode
         self.gamma = gamma
+        self.max_top_k = max_top_k
+        self.remove_threshold = remove_threshold
+        # setup embedder & metric
+        SimilarityScore.set_embedder(embedder_choice)
+        SimilarityScore.set_similarity_metric(similarity_metric)
 
     @staticmethod
     def _is_context_after_hole(query_case, repo_case):
-        hole_fpath_str = "/".join(query_case['metadata']['fpath_tuple'])
-        repo_fpath_str = "/".join(repo_case['fpath_tuple'])
-        if hole_fpath_str != repo_fpath_str:
-            return False
-        else:
-            query_case_line = max(query_case['metadata']['forward_context_line_list'])
-            repo_case_last_line = repo_case['max_line_no']
-            if repo_case_last_line >= query_case_line:
-                return True
-            else:
-                return False
+        h = "/".join(query_case['metadata']['fpath_tuple'])
+        r = "/".join(repo_case['fpath_tuple'])
+        if h != r: return False
+        return repo_case['max_line_no'] >= max(query_case['metadata']['forward_context_line_list'])
 
     def _text_jaccard_similarity_wrapper(self, query_case, repo_case):
         if self._is_context_after_hole(query_case, repo_case):
             return repo_case, 0
-        sim = SimilarityScore.text_jaccard_similarity(query_case['query_forward_encoding'],
-                                                      repo_case['key_forward_encoding'])
+        print(query_case['query_forward_encoding'])
+        sim = SimilarityScore.text_jaccard_similarity(
+            query_case['query_forward_encoding'], repo_case['key_forward_encoding'])
         return repo_case, sim
 
     def _graph_node_prior_similarity_wrapper(self, query_case, repo_case):
-        query_graph = json_to_graph(query_case['query_forward_graph'])
-        repo_graph = json_to_graph(repo_case['key_forward_graph'])
-        if len(repo_graph.nodes) == 0 or self._is_context_after_hole(query_case, repo_case):
+        qg = json_to_graph(query_case['query_forward_graph'])
+        rg = json_to_graph(repo_case['key_forward_graph'])
+        if len(rg.nodes) == 0 or self._is_context_after_hole(query_case, repo_case):
             return repo_case, 0
-        sim = SimilarityScore.subgraph_edit_similarity(query_graph, repo_graph, gamma=self.gamma)
+        sim = SimilarityScore.subgraph_edit_similarity(qg, rg, gamma=self.gamma)
         return repo_case, sim
 
     def _find_top_k_context_one_phase(self, query_case):
-        start_time = time.time()
+        start = time.time()
         repo_name = query_case['metadata']['task_id'].split('/')[0]
         search_res = copy.deepcopy(query_case)
-        repo_cases = load_jsonl(os.path.join(CONSTANTS.graph_database_save_dir, f"{repo_name}.jsonl"))
-        top_k_context = []
-        with ThreadPoolExecutor(max_workers=32) as executor:
-            if self.mode == 'coarse':
-                compute_sim = partial(self._text_jaccard_similarity_wrapper, query_case)
-            else:
-                compute_sim = partial(self._graph_node_prior_similarity_wrapper, query_case)
-            futures = executor.map(compute_sim, repo_cases)
-            top_k_context = list(futures)
-        top_k_context_filtered = []
-        for repo_case, sim in top_k_context:
-            if sim >= self.remove_threshold:
-                top_k_context_filtered.append((repo_case['val'], repo_case['statement'],
-                                               repo_case['key_forward_context'], repo_case['fpath_tuple'], sim))
-        top_k_context_filtered = sorted(top_k_context_filtered, key=lambda x: x[-1], reverse=False)
-        search_res['top_k_context'] = top_k_context_filtered[-self.max_top_k:]
-
-        case_id = query_case['metadata']['task_id']
-        print(f'case {case_id} finished')
-        end_time = time.time()
-        if self.mode == 'coarse':
-            search_res['text_runtime'] = end_time - start_time
-            search_res['graph_runtime'] = 0
-        else:
-            search_res['text_runtime'] = 0
-            search_res['graph_runtime'] = end_time - start_time
+        db = load_jsonl(os.path.join(CONSTANTS.graph_database_save_dir, f"{repo_name}.jsonl"))
+        compute = self._text_jaccard_similarity_wrapper if self.mode == 'coarse' else self._graph_node_prior_similarity_wrapper
+        results = list(ThreadPoolExecutor(max_workers=32).map(partial(compute, query_case), db))
+        filt = [(rc['val'], rc['statement'], rc['key_forward_context'], rc['fpath_tuple'], sim)
+                for rc, sim in results if sim >= self.remove_threshold]
+        search_res['top_k_context'] = sorted(filt, key=lambda x: x[-1])[-self.max_top_k:]
+        end = time.time()
+        search_res['text_runtime'] = end - start if self.mode == 'coarse' else 0
+        search_res['graph_runtime'] = 0 if self.mode == 'coarse' else end - start
+        print(f"case {query_case['metadata']['task_id']} finished")
         return search_res
 
     def _find_top_k_context_two_phase(self, query_case):
         repo_name = query_case['metadata']['task_id'].split('/')[0]
-        print(os.path.join(CONSTANTS.graph_database_save_dir, f"{repo_name}.jsonl"))
-        repo_cases = load_jsonl(os.path.join(CONSTANTS.graph_database_save_dir, f"{repo_name}.jsonl"))
-        text_runtime_start = time.time()
-        with ThreadPoolExecutor(max_workers=32) as executor:
-            compute_sim = partial(self._text_jaccard_similarity_wrapper, query_case)
-            futures = executor.map(compute_sim, repo_cases)
-            top_k_context_phase1 = list(futures)
-        top_k_context_phase1 = sorted(top_k_context_phase1, key=lambda x: x[1], reverse=False)[-self.max_top_k:]
-        text_runtime_end = time.time()
-
-        with ThreadPoolExecutor(max_workers=32) as executor:
-            compute_sim = partial(self._graph_node_prior_similarity_wrapper, query_case)
-            top_k_cases = []
-            for case, _ in top_k_context_phase1:
-                top_k_cases.append(case)
-            futures = executor.map(compute_sim, top_k_cases)
-            top_k_context_phase2 = list(futures)
-
-        top_k_context_filtered = []
-        for repo_case, sim in top_k_context_phase2:
-            if sim >= self.remove_threshold:
-                top_k_context_filtered.append((repo_case['val'], repo_case['statement'],
-                                               repo_case['key_forward_context'], repo_case['fpath_tuple'], sim))
-        top_k_context_filtered = sorted(top_k_context_filtered, key=lambda x: x[-1], reverse=False)
-
-        query_case['top_k_context'] = top_k_context_filtered[-self.max_top_k:]
-
-        graph_runtime_end = time.time()
-
-        case_id = query_case['metadata']['task_id']
-        print(f'case {case_id} finished')
-        query_case['text_runtime'] = text_runtime_end - text_runtime_start
-        query_case['graph_runtime'] = graph_runtime_end - text_runtime_end
-        return copy.deepcopy(query_case)
+        db = load_jsonl(os.path.join(CONSTANTS.graph_database_save_dir, f"{repo_name}.jsonl"))
+        # phase1 text
+        t0 = time.time()
+        p1 = list(ThreadPoolExecutor(max_workers=32).map(
+            partial(self._text_jaccard_similarity_wrapper, query_case), db))
+        top1 = sorted(p1, key=lambda x: x[1])[-self.max_top_k:]
+        t1 = time.time()
+        # phase2 graph
+        candidates = [case for case, _ in top1]
+        p2 = list(ThreadPoolExecutor(max_workers=32).map(
+            partial(self._graph_node_prior_similarity_wrapper, query_case), candidates))
+        filt = [(rc['val'], rc['statement'], rc['key_forward_context'], rc['fpath_tuple'], sim)
+                for rc, sim in p2 if sim >= self.remove_threshold]
+        result = copy.deepcopy(query_case)
+        result['top_k_context'] = sorted(filt, key=lambda x: x[-1])[-self.max_top_k:]
+        t2 = time.time()
+        result['text_runtime'], result['graph_runtime'] = t1 - t0, t2 - t1
+        print(f"case {query_case['metadata']['task_id']} finished")
+        return result
 
     def run(self):
-        query_lines_with_retrieved_results = []
-        if self.mode == 'coarse' or self.mode == 'fine':
-            for query_case in self.query_cases:
-                res = self._find_top_k_context_one_phase(query_case)
-                query_lines_with_retrieved_results.append(copy.deepcopy(res))
-        else:
-            for query_case in self.query_cases:
-                res = self._find_top_k_context_two_phase(query_case)
-                query_lines_with_retrieved_results.append(copy.deepcopy(res))
-        dump_jsonl(query_lines_with_retrieved_results, self.output_path)
+        out = []
+        for qc in self.query_cases:
+            if self.mode in ('coarse', 'fine'):
+                out.append(self._find_top_k_context_one_phase(qc))
+            else:
+                out.append(self._find_top_k_context_two_phase(qc))
+        dump_jsonl(out, self.output_path)
 
 
 if __name__ == '__main__':
-
-    args_parser = argparse.ArgumentParser()
-    args_parser.add_argument('--query_cases', default="api_level", type=str)
-    args_parser.add_argument('--mode', type=str, default='coarse2fine')
-    args_parser.add_argument('--gamma', default=0.1, type=float)
-    args = args_parser.parse_args()
-    print('a')
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--query_cases', default="api_level", type=str)
+    parser.add_argument('--mode', default='coarse2fine', type=str)
+    parser.add_argument('--gamma', default=0.1, type=float)
+    parser.add_argument('--embedder', choices=['codet5', 'codebert', 'graphcodebert', 'starcoder'], default='codet5')
+    parser.add_argument('--metric', choices=['cosine', 'dot', 'l2', 'l1'], default='cosine')
+    args = parser.parse_args()
 
     build_query_subgraph(f"{args.query_cases}.test.jsonl")
-
-    query_cases = load_jsonl(os.path.join(CONSTANTS.query_graph_save_dir, f"{args.query_cases}.test.jsonl"))
-
-    save_path = os.path.join(f"./search_results/{args.query_cases}.{args.mode}.{args.gamma*100}.search_res.jsonl")
+    cases = load_jsonl(os.path.join(CONSTANTS.query_graph_save_dir, f"{args.query_cases}.test.jsonl"))
+    save_path = os.path.join(f"./search_results/{args.query_cases}.{args.mode}.{int(args.gamma * 100)}.jsonl")
     make_needed_dir(save_path)
-
-    all_start_time = time.time()
-    searcher = CodeSearchWorker(query_cases, save_path, args.mode, gamma=args.gamma)
-    searcher.run()
-    all_end_time = time.time()
-
-    running_time = all_end_time - all_start_time
-    search_cases = load_jsonl(save_path)
-    hit1, hit5, hit10 = hit(search_cases, hits=[1, 5, 10])
-
-    print('-'*20 + "Parameters" + '-'*20)
-    print(f"query_cases: {args.query_cases}")
-    print(f'mode: {args.mode}')
-    print(f'gamma: {args.gamma}')
-    print('-' * 20 + "Results" + '-' * 20)
-    print(f'save_path: {save_path}')
-    print('hit1 %.4f' % hit1)
-    print('hit5 %.4f' % hit5)
-    print('hit10 %.4f' % hit10)
-    print('runtime %.4f' % running_time)
-
+    worker = CodeSearchWorker(
+        cases, save_path, args.mode, gamma=args.gamma,
+        embedder_choice=args.embedder,
+        similarity_metric=args.metric
+    )
+    worker.run()
+    res = load_jsonl(worker.output_path)
+    h1, h5, h10 = hit(res, hits=[1, 5, 10])
+    print(f"Hits@1: {h1:.4f}, Hits@5: {h5:.4f}, Hits@10: {h10:.4f}")
