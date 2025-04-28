@@ -16,43 +16,8 @@ from functools import partial
 from build_query_graph import build_query_subgraph
 import argparse
 
-
-# --- Similarity Functions ---
-def cosine_similarity(a, b):
-    norm1 = np.linalg.norm(a)
-    norm2 = np.linalg.norm(b)
-    return 0.0 if norm1 == 0 or norm2 == 0 else np.dot(a, b) / (norm1 * norm2)
-
-
-def dot_product(a, b):
-    return float(np.dot(a, b))
-
-
-def l2_distance(a, b):
-    return -float(np.linalg.norm(a - b))
-
-
-def l1_distance(a, b):
-    return -float(np.linalg.norm(a - b, ord=1))
-
-
-# --- Embedders ---
-class CodeEmbedder:
-    def __init__(self, model_name="Salesforce/codet5p-110m-embedding", max_length=512):
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
-        self.model = AutoModel.from_pretrained(model_name, torch_dtype=torch.float16, trust_remote_code=True).to(
-            self.device)
-        self.max_length = max_length
-        # default sim_fn
-        self.sim_fn = cosine_similarity
-
-    def get_embedding(self, code_text):
-        inputs = self.tokenizer(code_text, return_tensors="pt", truncation=True,
-                                max_length=self.max_length, padding="max_length").to(self.device)
-        with torch.no_grad():
-            outputs = self.model(**inputs)
-        return outputs.cpu().numpy()[0]
+from code_embedder import CodeEmbedder
+from similarity_functions import cosine_similarity, dot_product, l2_distance, l1_distance
 
 
 # --- Similarity & Embedding Manager ---
@@ -168,51 +133,69 @@ class CodeSearchWorker:
         if h != r: return False
         return repo_case['max_line_no'] >= max(query_case['metadata']['forward_context_line_list'])
 
-    def _text_jaccard_similarity_wrapper(self, query_case, repo_case):
+    def _text_search(self, query_case, repo_case):
         if self._is_context_after_hole(query_case, repo_case):
-            return repo_case, 0
-        print(query_case['query_forward_encoding'])
-        sim = SimilarityScore.text_jaccard_similarity(
-            query_case['query_forward_encoding'], repo_case['key_forward_encoding'])
-        return repo_case, sim
+            return repo_case, 0.0
+        embedder = SimilarityScore._embedder
+        sim_fn = embedder.sim_fn
 
-    def _graph_node_prior_similarity_wrapper(self, query_case, repo_case):
+        # query embedding
+        if 'query_embedding' in query_case:
+            q_emb = np.array(query_case['query_embedding'], dtype=np.float32)
+        else:
+            qdata = "".join(query_case.get('query_forward_context', ''))
+            q_emb = embedder.get_embedding(qdata)
+
+        # repo embedding (precomputed?) or compute on the fly
+        if 'embedding' in repo_case:
+            g_emb = np.array(repo_case['embedding'], dtype=np.float32)
+        else:
+            rdata = repo_case.get('key_forward_context', '')
+            g_emb = embedder.get_embedding(rdata)
+
+        return repo_case, sim_fn(q_emb, g_emb)
+
+    def _graph_search(self, query_case, repo_case):
         qg = json_to_graph(query_case['query_forward_graph'])
         rg = json_to_graph(repo_case['key_forward_graph'])
         if len(rg.nodes) == 0 or self._is_context_after_hole(query_case, repo_case):
-            return repo_case, 0
-        sim = SimilarityScore.subgraph_edit_similarity(qg, rg, gamma=self.gamma)
-        return repo_case, sim
+            return repo_case, 0.0
+        return repo_case, SimilarityScore.subgraph_edit_similarity(qg, rg, gamma=self.gamma)
 
     def _find_top_k_context_one_phase(self, query_case):
-        start = time.time()
-        repo_name = query_case['metadata']['task_id'].split('/')[0]
-        search_res = copy.deepcopy(query_case)
-        db = load_jsonl(os.path.join(CONSTANTS.graph_database_save_dir, f"{repo_name}.jsonl"))
-        compute = self._text_jaccard_similarity_wrapper if self.mode == 'coarse' else self._graph_node_prior_similarity_wrapper
-        results = list(ThreadPoolExecutor(max_workers=32).map(partial(compute, query_case), db))
-        filt = [(rc['val'], rc['statement'], rc['key_forward_context'], rc['fpath_tuple'], sim)
-                for rc, sim in results if sim >= self.remove_threshold]
-        search_res['top_k_context'] = sorted(filt, key=lambda x: x[-1])[-self.max_top_k:]
-        end = time.time()
-        search_res['text_runtime'] = end - start if self.mode == 'coarse' else 0
-        search_res['graph_runtime'] = 0 if self.mode == 'coarse' else end - start
-        print(f"case {query_case['metadata']['task_id']} finished")
-        return search_res
+        repo = query_case['metadata']['task_id'].split('/')[0]
+        emb_file = os.path.join(CONSTANTS.graph_database_save_dir, f"{repo}.with_emb.jsonl")
+        db_file = emb_file if os.path.exists(emb_file) else os.path.join(CONSTANTS.graph_database_save_dir,
+                                                                         f"{repo}.jsonl")
+        repo_cases = load_jsonl(db_file)
+
+        compute = self._text_search if self.mode == 'coarse' else self._graph_search
+        sims = []
+        for rc, score in ThreadPoolExecutor(max_workers=32).map(partial(compute, query_case), repo_cases):
+            if score >= self.remove_threshold:
+                sims.append((rc, score))
+
+        topk = sorted(sims, key=lambda x: x[1])[-self.max_top_k:]
+        out = copy.deepcopy(query_case)
+        out['top_k_context'] = [(r['val'], r['statement'], r['key_forward_context'], r['fpath_tuple'], s) for r, s in
+                                topk]
+        return out
 
     def _find_top_k_context_two_phase(self, query_case):
-        repo_name = query_case['metadata']['task_id'].split('/')[0]
-        db = load_jsonl(os.path.join(CONSTANTS.graph_database_save_dir, f"{repo_name}.jsonl"))
-        # phase1 text
+        repo = query_case['metadata']['task_id'].split('/')[0]
+        emb_file = os.path.join(CONSTANTS.graph_database_save_dir, f"{repo}.with_emb.jsonl")
+        db_file = emb_file if os.path.exists(emb_file) else os.path.join(CONSTANTS.graph_database_save_dir,
+                                                                         f"{repo}.jsonl")
+        db = load_jsonl(db_file)
         t0 = time.time()
         p1 = list(ThreadPoolExecutor(max_workers=32).map(
-            partial(self._text_jaccard_similarity_wrapper, query_case), db))
+            partial(self._text_search, query_case), db))
         top1 = sorted(p1, key=lambda x: x[1])[-self.max_top_k:]
         t1 = time.time()
         # phase2 graph
         candidates = [case for case, _ in top1]
         p2 = list(ThreadPoolExecutor(max_workers=32).map(
-            partial(self._graph_node_prior_similarity_wrapper, query_case), candidates))
+            partial(self._graph_search, query_case), candidates))
         filt = [(rc['val'], rc['statement'], rc['key_forward_context'], rc['fpath_tuple'], sim)
                 for rc, sim in p2 if sim >= self.remove_threshold]
         result = copy.deepcopy(query_case)
@@ -230,6 +213,29 @@ class CodeSearchWorker:
             else:
                 out.append(self._find_top_k_context_two_phase(qc))
         dump_jsonl(out, self.output_path)
+
+
+def precompute_repo_embeddings(repo_name: str, embedder, force: bool = False):
+    """
+    Reads <graph_database>/<repo_name>.jsonl,
+    for each case uses key_forward_encoding (if non-empty) else key_forward_context
+    to compute case["embedding"], then writes <repo_name>.with_emb.jsonl.
+    """
+    in_path = os.path.join(CONSTANTS.graph_database_save_dir, f"{repo_name}.jsonl")
+    out_path = os.path.join(CONSTANTS.graph_database_save_dir, f"{repo_name}.with_emb.jsonl")
+
+    if os.path.exists(out_path) and not force:
+        print(f"[precompute] {out_path} exists; skipping (use --force).")
+        return
+
+    cases = load_jsonl(in_path)
+    for case in cases:
+        tokens = case.get("key_forward_encoding") or []
+        data = tokens if tokens else case.get("key_forward_context", "")
+        case["embedding"] = embedder.get_embedding(data).tolist()
+
+    dump_jsonl(cases, out_path)
+    print(f"[precompute] saved embeddings to {out_path}")
 
 
 if __name__ == '__main__':
