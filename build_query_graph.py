@@ -22,12 +22,10 @@ def last_n_context_lines_graph(graph: nx.MultiDiGraph):
 def build_query_subgraph(task_name, embedder_choice: str = "codet5"):
     if embedder_choice == "codet5":
         embedder = CodeEmbedder("Salesforce/codet5p-110m-embedding", max_length=512)
-    elif choice == "codebert":
+    elif embedder_choice == "codebert":
         embedder = CodeEmbedder("microsoft/codebert-base", max_length=512)
-    elif choice == "graphcodebert":
+    elif embedder_choice == "graphcodebert":
         embedder = CodeEmbedder("microsoft/graphcodebert-base", max_length=512)
-    elif choice == "starcoder":
-        embedder = CodeEmbedder("bigcode/starcoder", max_length=2048)
     else:
         embedder = CodeEmbedder()
     test_cases = load_jsonl(os.path.join(CONSTANTS.dataset_dir, task_name))
@@ -59,7 +57,7 @@ def build_query_subgraph(task_name, embedder_choice: str = "codet5"):
             graph_test_cases.append(copy.deepcopy(graph_case))
             pbar.update(1)
 
-    save_path = os.path.join(CONSTANTS.query_graph_save_dir, task_name)
+    save_path = os.path.join(CONSTANTS.query_graph_save_dir, embedder_choice, task_name)
     make_needed_dir(save_path)
     dump_jsonl(graph_test_cases, save_path)
     return
