@@ -5,6 +5,7 @@ import networkx as nx
 from utils.ccg import create_graph
 from utils.slicing import Slicing
 from utils.utils import load_jsonl, make_needed_dir, graph_to_json, CONSTANTS, dump_jsonl, CodexTokenizer
+from code_embedder import CodeEmbedder
 
 
 def last_n_context_lines_graph(graph: nx.MultiDiGraph):
@@ -18,7 +19,17 @@ def last_n_context_lines_graph(graph: nx.MultiDiGraph):
     return slicer.forward_dependency_slicing(last_node_id, graph, contain_node=True)
 
 
-def build_query_subgraph(task_name):
+def build_query_subgraph(task_name, embedder_choice: str = "codet5"):
+    if embedder_choice == "codet5":
+        embedder = CodeEmbedder("Salesforce/codet5p-110m-embedding", max_length=512)
+    elif choice == "codebert":
+        embedder = CodeEmbedder("microsoft/codebert-base", max_length=512)
+    elif choice == "graphcodebert":
+        embedder = CodeEmbedder("microsoft/graphcodebert-base", max_length=512)
+    elif choice == "starcoder":
+        embedder = CodeEmbedder("bigcode/starcoder", max_length=2048)
+    else:
+        embedder = CodeEmbedder()
     test_cases = load_jsonl(os.path.join(CONSTANTS.dataset_dir, task_name))
     test_cases = test_cases[0:101]
     graph_test_cases = []
@@ -40,6 +51,7 @@ def build_query_subgraph(task_name):
             graph_case['query_forward_graph'] = graph_to_json(query_graph)
             graph_case['query_forward_context'] = query_ctx
             graph_case['query_forward_encoding'] = tokenizer.tokenize(query_ctx)
+            graph_case['query_embedding'] = embedder.get_embedding(query_ctx).tolist()
             context_lines = case['prompt'].splitlines(keepends=True)
             graph_case['context'] = context_lines
             graph_case['metadata'] = copy.deepcopy(case['metadata'])
@@ -54,7 +66,7 @@ def build_query_subgraph(task_name):
 
 
 if __name__ == "__main__":
-    tasks_name = ["api_level.java.test", 
+    tasks_name = ["api_level.java.test",
                   "line_level.java.test",
                   "api_level.python.test",
                   "line_level.python.test"]
