@@ -122,6 +122,7 @@ class CodeSearchWorker:
         self.gamma = gamma
         self.max_top_k = max_top_k
         self.remove_threshold = remove_threshold
+        self.embedder_choice = embedder_choice
         # setup embedder & metric
         SimilarityScore.set_embedder(embedder_choice)
         SimilarityScore.set_similarity_metric(similarity_metric)
@@ -164,7 +165,7 @@ class CodeSearchWorker:
 
     def _find_top_k_context_one_phase(self, query_case):
         repo = query_case['metadata']['task_id'].split('/')[0]
-        emb_file = os.path.join(CONSTANTS.graph_database_save_dir, f"{repo}.with_emb.jsonl")
+        emb_file = os.path.join(CONSTANTS.graph_database_save_dir, f"{repo}.{self.embedder_choice}.with_emb.jsonl")
         db_file = emb_file if os.path.exists(emb_file) else os.path.join(CONSTANTS.graph_database_save_dir,
                                                                          f"{repo}.jsonl")
         repo_cases = load_jsonl(db_file)
@@ -183,7 +184,7 @@ class CodeSearchWorker:
 
     def _find_top_k_context_two_phase(self, query_case):
         repo = query_case['metadata']['task_id'].split('/')[0]
-        emb_file = os.path.join(CONSTANTS.graph_database_save_dir, f"{repo}.with_emb.jsonl")
+        emb_file = os.path.join(CONSTANTS.graph_database_save_dir, f"{repo}.{self.embedder_choice}.with_emb.jsonl")
         db_file = emb_file if os.path.exists(emb_file) else os.path.join(CONSTANTS.graph_database_save_dir,
                                                                          f"{repo}.jsonl")
         db = load_jsonl(db_file)
@@ -222,7 +223,7 @@ def precompute_repo_embeddings(repo_name: str, embedder, force: bool = False):
     to compute case["embedding"], then writes <repo_name>.with_emb.jsonl.
     """
     in_path = os.path.join(CONSTANTS.graph_database_save_dir, f"{repo_name}.jsonl")
-    out_path = os.path.join(CONSTANTS.graph_database_save_dir, f"{repo_name}.with_emb.jsonl")
+    out_path = os.path.join(CONSTANTS.graph_database_save_dir, f"{repo_name}.{embedder}.with_emb.jsonl")
 
     if os.path.exists(out_path) and not force:
         print(f"[precompute] {out_path} exists; skipping (use --force).")
