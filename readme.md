@@ -1,8 +1,8 @@
-# GraphCoder: Enhancing Repository-Level Code Completion via Coarse-to-fine Retrieval Based on Code Context Graph
+# Towards Better Handling of Large Code Contexts: Improvements to Graph-based Generation
 
 ## Overview
 
-Fork with fixed bugs
+Fork with fixed bugs from GraphCoder and integration of various distance metrics with different embedders
 
 ## Project Structure
 
